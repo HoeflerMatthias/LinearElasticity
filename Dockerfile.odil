@@ -1,0 +1,19 @@
+# Dockerfile
+FROM python:3.11-slim
+
+# optional: system libs if later needed
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV MPLBACKEND=Agg
+WORKDIR /app
+
+# install all Python deps from one file
+COPY requirements.txt .
+
+RUN python -m pip install --no-cache-dir keras tensorflow
+
+RUN python -m pip install --no-cache-dir -r requirements.txt
+
+# no source copied; run with a mount
+ENTRYPOINT ["bash"]
