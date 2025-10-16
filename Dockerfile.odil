@@ -9,11 +9,11 @@ ENV MPLBACKEND=Agg
 WORKDIR /app
 
 # install all Python deps from one file
-COPY requirements.txt .
+COPY requirements.odil.txt .
 
 RUN python -m pip install --no-cache-dir keras tensorflow
 
-RUN python -m pip install --no-cache-dir -r requirements.txt
+RUN python -m pip install --no-cache-dir -r requirements.odil.txt
 
 # no source copied; run with a mount
 ENTRYPOINT ["bash"]

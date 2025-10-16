@@ -1,5 +1,9 @@
-numpy>=1.26,<2.0
-matplotlib>=3.8
+numpy
+matplotlib
 odil
 tensorflow-probability
 tf-keras
+meshio
+python-box
+pandas
+mlflow

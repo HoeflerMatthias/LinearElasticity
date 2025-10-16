@@ -3,9 +3,10 @@ import itertools
 import csv
 import time
 import json
+import os
 
 # Import your invscar from the same folder (or adjust PYTHONPATH)
-from invscar import invscar
+from aao_odil import invscar
 
 
 def ensure_dir(p):
@@ -79,32 +80,6 @@ def run_grid(out_root='runs', base_params=None, grid=None, run_name_fmt=None, ap
         res = invscar(**params)
         t1 = time.time()
 
-        # collect a compact record
-        record = {
-            'tag': res.tag,
-            'run_dir': res.run_dir,
-            'elapsed_sec': t1 - t0,
-            'J_fid': float(res.J_fid),
-            'J_reg': float(res.J_reg),
-            'rel_L2_alpha_final': float(res.err_alpha_L2_final),
-            'rel_H1s_alpha_final': float(res.err_alpha_H1s_final),
-            'rel_L2_u_final': float(res.err_u_L2_final),
-            'nit': getattr(res.res, 'nit', None),
-            'nfev': getattr(res.res, 'nfev', None),
-            'njev': getattr(res.res, 'njev', None),
-            'success': getattr(res.res, 'success', None),
-        }
-        record.update({k: params.get(k) for k in params})
-        index.append(record)
-
-        # write per-run summary JSON
-        with open(Path(res.run_dir) / 'summary.json', 'w') as f:
-            json.dump(record, f, indent=2)
-
-        # also append a global JSON index for convenience
-        with open(index_json, 'w') as f:
-            json.dump(index, f, indent=2)
-
     print("\nAll runs complete. Global summary CSV at:", Path(out_root) / 'summary.csv')
     print("JSON index at:", index_json)
 
@@ -113,29 +88,30 @@ if __name__ == '__main__':
     # Example sweep
     base = dict(
         # geometry (truth vs inversion)
-        Nx_true=80, Ny_true=80, Nz_true=40,
-        Nx_inv=60,  Ny_inv=60,  Nz_inv=30,
+        #Nx_true=80, Ny_true=80, Nz_true=40,
+        Nx_inv=20,  Ny_inv=20,  Nz_inv=10,
         # physics
         lambda_=650.0, mu=8.0, p_load=10.0,
         # objective
-        J_fide='full',
+        lam_pde=1e1, lam_bcn=1e1, lam_dat=1e1, lam_reg=1e0,
         noise_level=1e-2,
+        data_csv=os.getcwd() + '/linear_symcube_p10.csv',
     )
 
     grid = dict(
-        J_regu=['H1', 'TV'], #'L2', 'H1',
-        lmbda=[5e-5, 1e-4, 5e-5], # 1e-1, 5e-1, 1e0, 5e0, 1e1
-        p_load=[10.0],
-        noise_level=[5e-2],
+        J_regu=['H1'], #'L2', 'H1',
+        lam_pde=[1e2, 1e4],
+        lam_bcn=[1e0, 1e2],
+        lam_dat=[1e0, 1e2, 1e4, 1e6],
+        lam_reg=[1e-2,1e0,1e2],
     )
 
     # optional: give human-friendly run names
     def fmt(p):
-        return (f"reg{p['J_regu']}_lam{p['lmbda']}_"
+        return (f"reg{p['J_regu']}_lam{p['lam_reg']}_"
                 f"Ninv{p['Nx_inv']}x{p['Ny_inv']}x{p['Nz_inv']}_"
-                f"Ntrue{p['Nx_true']}x{p['Ny_true']}x{p['Nz_true']}_"
-                f"pload{p['p_load']}_"
+                f"weight{p['lam_dat']}x{p['lam_pde']}x{p['lam_bcn']}_"
                 f"noise{p['noise_level']}"
         )
 
-    run_grid(out_root='run_red', base_params=base, grid=grid, run_name_fmt=fmt)
+    run_grid(out_root=os.getcwd() + '/runs_odil', base_params=base, grid=grid, run_name_fmt=fmt)
