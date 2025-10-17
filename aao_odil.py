@@ -285,8 +285,8 @@ def invscar(**params):
     params.linsolver = 'direct'
     params.multigrid = True
     params.lr = 0.001
-    params.epochs1 = 1000
-    params.epochs2 = 30000
+    params.epochs1 = 5000
+    params.epochs2 = 1000
 
 
     params.plot_every = 5000
@@ -316,11 +316,11 @@ def invscar(**params):
             extrap = odil.core.extrap_quadh
             c = st["c"]
             if axis_min_mask == "x":
-                st["xm"] = mod.where(ix == 0, extrap(st["xp"], c, 0), st["xm"])
+                st["xm"] = mod.where(ix == 0, ctx.cast(0.0), st["xm"])
             elif axis_min_mask == "y":
-                st["ym"] = mod.where(iy == 0, extrap(st["yp"], c, 0), st["ym"])
+                st["ym"] = mod.where(iy == 0, ctx.cast(0.0), st["ym"])
             elif axis_min_mask == "z":
-                st["zm"] = mod.where(iz == 0, extrap(st["zp"], c, 0), st["zm"])
+                st["zm"] = mod.where(iz == 0, ctx.cast(0.0), st["zm"])
             return st
 
         # ----------------- displacement stencils -----------------
@@ -349,7 +349,7 @@ def invscar(**params):
         # ----------------- PDE residual -----------------
         vol = ctx.cast(dx * dy * dz)
 
-        offset = 0
+        offset = 1
         interior = (ix >= offset) & (ix <= nx - 1 - offset) & (iy >= offset) & (iy <= ny - 1 - offset) & (iz >= offset) & (iz <= nz - 1 - offset)
         M = ctx.cast(interior)
 
