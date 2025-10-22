@@ -117,8 +117,8 @@ def compute_stress(E, lambda_, mu):
     I = tf.eye(3, dtype=tf.float64)[..., tf.newaxis, tf.newaxis, tf.newaxis] # Shape (3,3,1,1,1)
     I = tf.broadcast_to(I, E.shape)  # Shape (3,3,nx,ny,nz)
     # Calculate the stress tensor components
-    sigma = lambda_ * trace_E * I + 2 * mu * E
-
+    mue = tf.broadcast_to(mu, E.shape)
+    sigma = lambda_ * trace_E * I + 2 * mue * E
     return sigma
 
 
@@ -281,12 +281,13 @@ def invscar(**params):
     params = parser.parse_args(namespace=params)
 
     # Optimizer parameters
-    params.optimizer = 'adam'
+    params.optimizer1 = 'adam'
+    params.optimizer2 = 'lbfgs'
     params.linsolver = 'direct'
     params.multigrid = True
     params.lr = 0.001
     params.epochs1 = 1000
-    params.epochs2 = 30000
+    params.epochs2 = 50001
 
 
     params.plot_every = 5000
@@ -300,45 +301,20 @@ def invscar(**params):
         ix, iy, iz = ctx.indices()
         nx, ny, nz = ctx.size()
 
-        def stencil(key):
-            return dict(
-                c=ctx.field(key, 0, 0, 0),
-                xm=ctx.field(key, -1, 0, 0, ),
-                xp=ctx.field(key, +1, 0, 0),
-                ym=ctx.field(key, 0, -1, 0),
-                yp=ctx.field(key, 0, +1, 0),
-                zm=ctx.field(key, 0, 0, -1),
-                zp=ctx.field(key, 0, 0, +1),
-            )
+        ux = ctx.field("ux", 0, 0, 0)
+        uy = ctx.field("uy", 0, 0, 0)
+        uz = ctx.field("uz", 0, 0, 0)
+        ux = mod.where(ix == 0, ctx.cast(0.0), ux)
+        uy = mod.where(iy == 0, ctx.cast(0.0), uy)
+        uz = mod.where(iz == 0, ctx.cast(0.0), uz)
 
-        def apply_dirichlet_minface(st, axis_min_mask):
-            # Zero Dirichlet conditions, quadratic extrapolation.
-            extrap = odil.core.extrap_quadh
-            c = st["c"]
-            if axis_min_mask == "x":
-                st["xm"] = mod.where(ix == 0, extrap(st["xp"], c, 0), st["xm"])
-            elif axis_min_mask == "y":
-                st["ym"] = mod.where(iy == 0, extrap(st["yp"], c, 0), st["ym"])
-            elif axis_min_mask == "z":
-                st["zm"] = mod.where(iz == 0, extrap(st["zp"], c, 0), st["zm"])
-            return st
-
-        # ----------------- displacement stencils -----------------
-        ux = apply_dirichlet_minface(stencil("ux"), "x")
-        uy = apply_dirichlet_minface(stencil("uy"), "y")
-        uz = apply_dirichlet_minface(stencil("uz"), "z")
-
-        lam = ctx.cast(lambda_)
+        l = ctx.cast(lambda_)
 
         mu_r = ctx.field("mu_raw", 0, 0, 0)
         mu = param(mu_r)  # already grid-shaped
 
-        #one = mod.ones(domain.cshape, dtype=mod.float64)
-        #alpha = mod.where(ix < iy, 1.0 * one, 2.0 * one)
-        #mu = param(alpha)
-
         # ----------------- strain -----------------
-        E = compute_strain_tensor_lagrangian_full(ux["c"], uy["c"], uz["c"], ctx)
+        E = compute_strain_tensor_lagrangian_full(ux, uy, uz, ctx)
 
         # ----------------- nodal stresses -----------------
         sigma= compute_stress(E, lambda_, mu)
@@ -349,7 +325,7 @@ def invscar(**params):
         # ----------------- PDE residual -----------------
         vol = ctx.cast(dx * dy * dz)
 
-        offset = 0
+        offset = 1
         interior = (ix >= offset) & (ix <= nx - 1 - offset) & (iy >= offset) & (iy <= ny - 1 - offset) & (iz >= offset) & (iz <= nz - 1 - offset)
         M = ctx.cast(interior)
 
@@ -368,24 +344,27 @@ def invscar(**params):
         kneum_y = ctx.cast(lam_bcn) * mod.sqrt(axz)
         kneum_z = ctx.cast(lam_bcn) * mod.sqrt(axy)
 
-        mask_xp = (ix == nx - 1);
-        mask_yp = (iy == ny - 1);
+        mask_xp = (ix == nx - 1)
+        mask_yp = (iy == ny - 1)
         mask_zp = (iz == nz - 1)
 
         p_vec = tf.reshape(tf.constant([0.0, 0.0, p_load], dtype=tf.float64), (1,3,1,1,1))
-
+        tf.print(sigma[:,:,3,3,3])
         res += [
             ("bc_z", kneum_z * mod.where(mask_zp, sigma[:,2,...] - p_vec, ctx.cast(0))),
             ("bc_y", kneum_y * mod.where(mask_yp, sigma[:,1,...], ctx.cast(0))),
-            ("bc_x", kneum_y * mod.where(mask_xp, sigma[:,0, ...], ctx.cast(0))),
+            ("bc_x", kneum_x * mod.where(mask_xp, sigma[:,0, ...], ctx.cast(0))),
         ]
 
         # ----------------- data misfit -----------------
 
-        u = tf.stack([ux["c"], uy["c"], uz["c"]], axis=-1)
+        u = tf.stack([ux, uy, uz], axis=-1)
         res += [
             ("data_u", ctx.cast(lam_dat) * (u - mod.constant(extra.data_u))),
+           # ("e_u", ctx.cast(1e-2) * (E[0,0,...]+E[1,1,...]+E[2,2,...]))
         ]
+
+
 
         # ----------------- μ-regularization -----------------
 
@@ -396,11 +375,11 @@ def invscar(**params):
         if J_regu == 'TV':
             eps = ctx.cast(1e-8)
             tv = mod.sqrt(gmx * gmx + gmy * gmy + gmz * gmz + eps)
-            res += [("mu_tv", ctx.cast(lam_reg) * M * tv)]
+            res += [("mu_tv", ctx.cast(lam_reg) * tv)]
         elif J_regu == 'H1':
-            res += [("mu_h1_x", ctx.cast(lam_reg) * M * gmx),
-                        ("mu_h1_y", ctx.cast(lam_reg) * M * gmy),
-                        ("mu_h1_z", ctx.cast(lam_reg) * M * gmz)]
+            res += [("mu_h1_x", ctx.cast(lam_reg) * gmx),
+                        ("mu_h1_y", ctx.cast(lam_reg) * gmy),
+                        ("mu_h1_z", ctx.cast(lam_reg) * gmz)]
 
         return res
 
@@ -437,11 +416,11 @@ def invscar(**params):
 
     # State
     state = odil.State(
-        fields = {"ux": None, "uy": None, "uz": None}
+        fields = {"ux": None, "uy": None, "uz": None, "mu_raw": None}
     )
     state = domain.init_state(state)
 
-    state.fields["mu_raw"] = np.full(domain.cshape, 1.5, dtype=np.float64)
+    #state.fields["mu_raw"] = np.full(domain.cshape, 1.5, dtype=np.float64)
 
     state = domain.init_state(state)
     problem = odil.Problem(operator, domain, extra)
@@ -453,14 +432,14 @@ def invscar(**params):
     def cb(state, epoch, pinfo):
         # 1) Enforce constraints in-place
         a = state.fields["mu_raw"].array
-        a = np.clip(a, 0.0, None)  # enforce a >= 0 if desired
+        a = np.clip(a, 8.0/8.0, 16.0/8.0)  # enforce a >= 0 if desired
 
         state.fields["mu_raw"].array = a
         # 2) Continue with your normal callback (history/plot/report)
         return callback(state, epoch, pinfo)
 
     params.epochs = params.epochs1
-    odil.util.optimize(params, "adam", problem, state, cb)
+    odil.util.optimize(params, params.optimizer1, problem, state, cb)
     params.epochs = params.epochs2
     # Rename first training log
     if os.path.exists("train.csv"):
@@ -468,7 +447,7 @@ def invscar(**params):
     callback = odil.make_callback(
         problem, params, plot_func=plot_func, history_func=history_func, report_func=report_func
     )
-    odil.util.optimize(params, "lbfgs", problem, state, cb)
+    odil.util.optimize(params, params.optimizer2, problem, state, cb)
     # Combine both training logs
     if os.path.exists("train_tmp.csv") and os.path.exists("train.csv"):
         df1 = pd.read_csv("train_tmp.csv")
@@ -495,7 +474,7 @@ def invscar(**params):
         logy=True,
     )
 
-    mlflow.set_tracking_uri("http://localhost:8080")  # 143.50.189.222
+    mlflow.set_tracking_uri("http://143.50.189.222:8080")  # 143.50.189.222
     mlflow.set_experiment("elasticity_aao_odil:0.0.0")
     mlflow.start_run()
     mlflow.log_params(vars(params))
