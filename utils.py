@@ -74,27 +74,3 @@ def run_grid(invscar, out_root='runs', base_params=None, grid=None, run_name_fmt
 
     print("\nAll runs complete. Global summary CSV at:", Path(out_root) / 'summary.csv')
     print("JSON index at:", index_json)
-
-def L2_error(a, a_ref, rel=True):
-    """
-    Compute relative L2 error between 'a' and 'a_ref',
-    interpolating 'a' onto the mesh of 'a_ref' if needed.
-    """
-    mesh_ref = a_ref.ufl_domain()
-
-    # --- 1. Interpolate 'a' to the reference mesh if meshes differ ---
-    if a.ufl_domain().id() != mesh_ref.id():
-        V_ref = a_ref.function_space()
-        # Interpolate expression of 'a' onto the finer mesh
-        a_fine = Function(V_ref)
-        a_fine.interpolate(a)   # evaluates a at fine-mesh quadrature points
-    else:
-        a_fine = a
-
-    # --- 2. Assemble L2 norms on the reference (fine) mesh ---
-    if rel:
-        err = assemble(dot(a_fine - a_ref, a_fine - a_ref) / (dot(a_ref, a_ref) + 1e-12) * dx(domain=mesh_ref))
-    else:
-        err = assemble(dot(a_fine - a_ref, a_fine - a_ref) * dx(domain=mesh_ref))
-
-    return float(np.sqrt(err))

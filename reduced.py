@@ -8,20 +8,44 @@ from pathlib import Path
 import json
 from types import SimpleNamespace
 
-from utils import L2_error
-
 __all__ = ["invscar"]
+
+def L2_error(a, a_ref, rel=True):
+    """
+    Compute relative L2 error between 'a' and 'a_ref',
+    interpolating 'a' onto the mesh of 'a_ref' if needed.
+    """
+    V_ref = a_ref.function_space()
+    mesh_ref = V_ref.mesh()
+
+    mesh_a = a.function_space().mesh()
+
+    if mesh_a is not mesh_ref:
+        a_fine = Function(V_ref)
+        a_fine.interpolate(a)  # evaluate a on the fine mesh
+    else:
+        a_fine = a
+
+    # --- 2. Assemble L2 norms on the reference (fine) mesh ---
+    if rel:
+        err = assemble(dot(a_fine - a_ref, a_fine - a_ref) / (dot(a_ref, a_ref) + 1e-12) * dx(domain=mesh_ref))
+    else:
+        err = assemble(dot(a_fine - a_ref, a_fine - a_ref) * dx(domain=mesh_ref))
+
+    return float(np.sqrt(err))
+
+def fmt(p):
+    return (f"reg{p['J_regu']}_lam{float(p['lam_reg'])}_"
+            f"Ninv{p['Nx_inv']}x{p['Ny_inv']}x{p['Nz_inv']}_"
+            f"noise{p['noise_level']}"
+    )
 
 def invscar(**params):
 
     # Geometry
-    Nx_t = params.get('Nx_true', 80)
-    Ny_t = params.get('Ny_true', 80)
-    Nz_t = params.get('Nz_true', 40)
-
-    Nx_i = params.get('Nx_inv', 20)
-    Ny_i = params.get('Ny_inv', 20)
-    Nz_i = params.get('Nz_inv', 10)
+    Nx_i = params.get('Nx_inv', 10)
+    Ny_i = params.get('Ny_inv', 10)
+    Nz_i = params.get('Nz_inv', 5)
 
     Lx = params.get('Lx', 2.0)
     Ly = params.get('Ly', 2.0)
@@ -45,45 +69,28 @@ def invscar(**params):
     data_csv = params.get("data_csv", "linear_symcube_p10.h5")
 
     # File handling
-    tag = params.get('run_name', None)
-    if tag is None:
-        tag = f"Ninv{Nx_i}x{Ny_i}x{Nz_i}_pload{float(p_load)}_noise{float(noise_level)}"
+    tag = fmt({
+        'J_regu': J_regu,
+        'lam_reg': lam_reg,
+        'Nx_inv': Nx_i,
+        'Ny_inv': Ny_i,
+        'Nz_inv': Nz_i,
+        'noise_level': noise_level
+    })
 
     # output root and run directory
     out_root = Path(params.get('out_root', 'runs_red'))
     run_dir = out_root / tag
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    # persist run metadata
-    meta = {
-        'Nx_true': Nx_t, 'Ny_true': Ny_t, 'Nz_true': Nz_t,
-        'Nx_inv': Nx_i, 'Ny_inv': Ny_i, 'Nz_inv': Nz_i,
-        'Lx': Lx, 'Ly': Ly, 'Lz': Lz,
-        'lambda_': float(lambda_), 'mu': float(mu), 'p_load': float(p_load),
-        'noise_level': noise_level,
-        'noise_seed': noise_seed,
-        'lam_reg': float(lam_reg)
-    }
-
-    with open(run_dir / 'meta.json', 'w') as f:
-        json.dump(meta, f, indent=2)
-
     # Geometry
-    mm_true = BoxMesh(Nx_t, Ny_t, Nz_t, Lx, Ly, Lz, hexahedral=False)
     mm_inv = BoxMesh(Nx_i, Ny_i, Nz_i, Lx, Ly, Lz, hexahedral=False)
 
-    dim = mm_true.geometric_dimension()
+    dim = mm_inv.geometric_dimension()
 
-    x_t = SpatialCoordinate(mm_true)
     x_i = SpatialCoordinate(mm_inv)
 
-    # Inverse param
-    alpha_expr_t = conditional(x_t[0] < x_t[1], 1.0, 2.0)
-
     # Spaces
-    V_t = VectorFunctionSpace(mm_true, "P", 1)
-    Q_t = FunctionSpace(mm_true, "P", 1)
-
     V_i = VectorFunctionSpace(mm_inv, "P", 1)  # u
     Q_i = FunctionSpace(mm_inv, "P", 1)  # alpha
 
@@ -95,9 +102,6 @@ def invscar(**params):
     ]
 
     # Functions
-    alpha_t = Function(Q_t, name="alpha_true")
-    u_t = Function(V_t, name="u_true")
-
     ud = Function(V_i, name="displ_data")
 
     u_i = Function(V_i, name="displacement")
@@ -132,7 +136,7 @@ def invscar(**params):
     eps = sym(grad(u_i))
     W = (lambda_/2)*tr(eps)**2 * dx \
       + alpha_i*mu*inner(eps, eps)*dx \
-      + dot(p_load*Constant((0.0, 0.0, 1.0)), u_i)*ds(6)
+      - dot(p_load*Constant((0.0, 0.0, 1.0)), u_i)*ds(6)
 
     G = derivative(W, u_i)
     fwd_prob   = NonlinearVariationalProblem(G, u_i, bcs, form_compiler_parameters={'quadrature_degree': 2})
@@ -213,10 +217,10 @@ def invscar(**params):
     # -----------------------------
     # Final metrics and splits
     # -----------------------------
-    final_alpha_L2 = rel_L2_error(alpha_i, alpha_true_on_inv)
-    final_u_L2 = rel_L2_error(u_i, u_true_on_inv)
+    final_alpha_L2 = L2_error(alpha_i, alpha_t)
+    final_u_L2 = L2_error(u_i, u_t)
 
-    J_fid = float(assemble(J_f(u_i - ud)))
+    J_fid = float(assemble(J_ful(u_i - ud)))
     J_reg = float(assemble(J_R(alpha_i)))
 
     # -----------------------------
@@ -256,15 +260,15 @@ def invscar(**params):
     if params.get('append_global_summary', True):
         summary_path = out_root / 'summary.csv'
         header = [
-            'tag', 'run_dir', 'Nx_true', 'Ny_true', 'Nz_true', 'Nx_inv', 'Ny_inv', 'Nz_inv',
-            'lambda_', 'mu', 'p_load', 'J_fide', 'J_regu', 'lmbda', 'noise_level',
+            'tag', 'run_dir', 'Nx_inv', 'Ny_inv', 'Nz_inv',
+            'J_regu', 'lmbda', 'noise_level',
             'J_fid', 'J_reg',
             'rel_L2_alpha_final', 'L2_u_final',
             'nit', 'nfev', 'njev', 'success'
         ]
         row = [
-            tag, str(run_dir), Nx_t, Ny_t, Nz_t, Nx_i, Ny_i, Nz_i,
-            float(lambda_), float(mu), float(p_load), J_fide, J_regu, float(lam_reg), noise_level,
+            tag, str(run_dir), Nx_i, Ny_i, Nz_i,
+            J_regu, float(lam_reg), noise_level,
             float(J_fid), float(J_reg),
             float(final_alpha_L2), float(final_u_L2),
             getattr(res, 'nit', None), getattr(res, 'nfev', None), getattr(res, 'njev', None),

@@ -10,13 +10,39 @@ from petsc4py import PETSc
 
 __all__ = ["invscar"]
 
+def L2_error(a, a_ref, rel=True):
+    """
+    Compute relative L2 error between 'a' and 'a_ref',
+    interpolating 'a' onto the mesh of 'a_ref' if needed.
+    """
+    V_ref = a_ref.function_space()
+    mesh_ref = V_ref.mesh()
+
+    mesh_a = a.function_space().mesh()
+
+    if mesh_a is not mesh_ref:
+        a_fine = Function(V_ref)
+        a_fine.interpolate(a)  # evaluate a on the fine mesh
+    else:
+        a_fine = a
+
+    # --- 2. Assemble L2 norms on the reference (fine) mesh ---
+    if rel:
+        err = assemble(dot(a_fine - a_ref, a_fine - a_ref) / (dot(a_ref, a_ref) + 1e-12) * dx(domain=mesh_ref))
+    else:
+        err = assemble(dot(a_fine - a_ref, a_fine - a_ref) * dx(domain=mesh_ref))
+
+    return float(np.sqrt(err))
+
+def fmt(p):
+    return (f"reg{p['J_regu']}_lam{float(p['lam_reg'])}_"
+            f"Ninv{p['Nx_inv']}x{p['Ny_inv']}x{p['Nz_inv']}_"
+            f"noise{p['noise_level']}"
+    )
+
 def invscar(**params):
 
     # Geometry
-    Nx_t = params.get('Nx_true', 80)
-    Ny_t = params.get('Ny_true', 80)
-    Nz_t = params.get('Nz_true', 40)
-
     Nx_i = params.get('Nx_inv', 40)
     Ny_i = params.get('Ny_inv', 40)
     Nz_i = params.get('Nz_inv', 20)
@@ -38,56 +64,34 @@ def invscar(**params):
     lam_reg = Constant(params.get('lam_reg', 1e-5))
 
     # File handling
-    tag = params.get('run_name', None)
-    if tag is None:
-        tag = f"Ntrue{Nx_t}x{Ny_t}x{Nz_t}_Ninv{Nx_i}x{Ny_i}x{Nz_i}_pload{float(p_load)}_noise{float(noise_level)}"
+    tag = fmt({
+        'J_regu': J_regu,
+        'lam_reg': lam_reg,
+        'Nx_inv': Nx_i,
+        'Ny_inv': Ny_i,
+        'Nz_inv': Nz_i,
+        'noise_level': noise_level
+    })
 
     # output root and run directory
     out_root = Path(params.get('out_root', 'runs_kkt'))
     run_dir = out_root / tag
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    # persist run metadata
-    meta = {
-        'Nx_true': Nx_t, 'Ny_true': Ny_t, 'Nz_true': Nz_t,
-        'Nx_inv': Nx_i, 'Ny_inv': Ny_i, 'Nz_inv': Nz_i,
-        'Lx': Lx, 'Ly': Ly, 'Lz': Lz,
-        'lambda_': float(lambda_), 'mu': float(mu), 'p_load': float(p_load),
-        'noise_level': noise_level,
-        'noise_seed': noise_seed,
-        'lam_reg': float(lam_reg)
-    }
-
-    with open(run_dir / 'meta.json', 'w') as f:
-        json.dump(meta, f, indent=2)
-
     # Geometry
-    mm_true = BoxMesh(Nx_t, Ny_t, Nz_t, Lx, Ly, Lz, hexahedral=False)
     mm_inv = BoxMesh(Nx_i, Ny_i, Nz_i, Lx, Ly, Lz, hexahedral=False)
 
-    dim = mm_true.geometric_dimension()
+    dim = mm_inv.geometric_dimension()
 
-    x_t = SpatialCoordinate(mm_true)
     x_i = SpatialCoordinate(mm_inv)
 
-    # Inverse param
-    alpha_expr_t = conditional(x_t[0] < x_t[1], 1.0, 2.0)
-
     # Spaces
-    V_t = VectorFunctionSpace(mm_true, "P", 1)
-    Q_t = FunctionSpace(mm_true, "P", 1)
-
     V_i = VectorFunctionSpace(mm_inv, "P", 1)  # u
     Q_i = FunctionSpace(mm_inv, "P", 1)  # alpha
 
     W_i = V_i * Q_i * V_i
 
     # Boundary conditions
-    bcs_t = [
-        DirichletBC(V_t.sub(0), Constant(0.0), 1),
-        DirichletBC(V_t.sub(1), Constant(0.0), 3),
-        DirichletBC(V_t.sub(2), Constant(0.0), 5),
-    ]
 
     bcs_i_v = [
         DirichletBC(V_i.sub(0), Constant(0.0), 1),
@@ -106,11 +110,6 @@ def invscar(**params):
     ]
 
     # Functions
-    alpha_t = Function(Q_t, name="alpha_true")
-    alpha_t.interpolate(alpha_expr_t)
-
-    u_t = Function(V_t, name="u_true")
-
     ud = Function(V_i, name="displ_data")
 
     w_i = Function(W_i)
@@ -120,19 +119,11 @@ def invscar(**params):
     psi_i = TestFunction(W_i)
     v_i, beta_i, q_i = split(psi_i)
 
-    # Model
-    eps_t = sym(grad(u_t))
-
-    W_t = (lambda_ / 2) * tr(eps_t) ** 2 * dx \
-          + alpha_t * mu * inner(eps_t, eps_t) * dx \
-          - dot(p_load * Constant((0.0, 0.0, 1.0)), u_t) * ds(6)
-
-    G_t = derivative(W_t, u_t)
-
     # --- load forward/ground-truth data from CSV ---
     with CheckpointFile(data_csv, "r") as chk:
-        chk.load_function(alpha_t)
-        chk.load_function(u_t)
+        mm_true = chk.load_mesh()
+        alpha_t = chk.load_function(mm_true, name="alpha_true")
+        u_t = chk.load_function(mm_true, name="u_true")
 
     ud.interpolate(u_t)
 
@@ -242,6 +233,7 @@ def invscar(**params):
 
     solver.snes.setMonitor(_monitor)
     solver.solve()
+    nit = solver.snes.getIterationNumber()
 
     # final objective split
     J_fid, J_reg = compute_objective_terms(u_ifun, alpha_ifun)
@@ -288,19 +280,18 @@ def invscar(**params):
     if params.get('append_global_summary', True):
         summary_path = out_root / 'summary.csv'
         header = [
-            'tag', 'run_dir', 'Nx_true', 'Ny_true', 'Nz_true', 'Nx_inv', 'Ny_inv', 'Nz_inv',
-            'lambda_', 'mu', 'p_load', 'J_fide', 'J_regu', 'lmbda', 'noise_level',
+            'tag', 'run_dir', 'Nx_inv', 'Ny_inv', 'Nz_inv',
+            'J_regu', 'lmbda', 'noise_level',
             'J_fid', 'J_reg',
-            'rel_L2_alpha_final', 'rel_L2_alpha_final2', 'rel_H1s_alpha_final', 'rel_L2_u_final',
+            'rel_L2_alpha_final', 'L2_u_final',
             'nit', 'nfev', 'njev', 'success'
         ]
         row = [
-            tag, str(run_dir), Nx_t, Ny_t, Nz_t, Nx_i, Ny_i, Nz_i,
-            float(lambda_), float(mu), float(p_load), params.get('J_fide', 'full'), params.get('J_regu', 'H1'),
-            float(lam_reg), params.get('noise_level', 1e-2),
+            tag, str(run_dir), Nx_i, Ny_i, Nz_i,
+            J_regu, float(lam_reg), noise_level,
             float(J_fid), float(J_reg),
-            float(final_alpha_L2), float(final_alpha_L22), float(final_alpha_H1s), float(final_u_L2),
-            None, None, None, True
+            float(final_alpha_L2), float(final_u_L2),
+            nit, None, None, True
         ]
         write_header = not summary_path.exists()
         with open(summary_path, 'a', newline='') as f:
