@@ -235,9 +235,9 @@ def plot_func(problem, state, epoch, frame, cbinfo=None):
 
 def invscar(**params):
     # Geometry
-    Nx_i = params.get('Nx_inv', 40)
-    Ny_i = params.get('Ny_inv', 40)
-    Nz_i = params.get('Nz_inv', 20)
+    Nx_i = params.get('Nx_inv', 60)
+    Ny_i = params.get('Ny_inv', 60)
+    Nz_i = params.get('Nz_inv', 30)
 
     Lx = params.get('Lx', 2.0)
     Ly = params.get('Ly', 2.0)
@@ -285,8 +285,8 @@ def invscar(**params):
     params.linsolver = 'direct'
     params.multigrid = True
     params.lr = 0.001
-    params.epochs1 = 5000
-    params.epochs2 = 1000
+    params.epochs1 = 1000
+    params.epochs2 = 100000
 
 
     params.plot_every = 5000

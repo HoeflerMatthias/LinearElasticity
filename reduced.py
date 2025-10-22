@@ -127,7 +127,7 @@ def invscar(**params):
     # File handling
     tag = params.get('run_name', None)
     if tag is None:
-        tag = f"Ntrue{Nx_t}x{Ny_t}x{Nz_t}_Ninv{Nx_i}x{Ny_i}x{Nz_i}_pload{float(p_load)}_noise{float(noise_level)}"
+        tag = f"Ninv{Nx_i}x{Ny_i}x{Nz_i}_pload{float(p_load)}_noise{float(noise_level)}"
 
     # output root and run directory
     out_root = Path(params.get('out_root', 'runs_red'))
