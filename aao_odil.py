@@ -309,8 +309,6 @@ def invscar(**params):
         uz = mod.where(iz == 0, ctx.cast(0.0), uz)
 
         l = ctx.cast(lambda_)
-
-        mu_r = ctx.field("mu_raw", 0, 0, 0)
         mu = param(mu_r)  # already grid-shaped
 
         # ----------------- strain -----------------

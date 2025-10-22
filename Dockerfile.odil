@@ -14,4 +14,3 @@ COPY requirements.odil.txt .
 RUN python -m pip install --no-cache-dir keras tensorflow
 
 RUN python -m pip install --no-cache-dir -r requirements.odil.txt
-
