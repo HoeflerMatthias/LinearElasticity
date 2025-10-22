@@ -63,6 +63,8 @@ def invscar(**params):
     J_regu = params.get('J_regu', 'H1')
     lam_reg = Constant(params.get('lam_reg', 1e-5))
 
+    data_csv = params.get("data_csv", "linear_symcube_p10.h5")
+
     # File handling
     tag = fmt({
         'J_regu': J_regu,
@@ -132,17 +134,16 @@ def invscar(**params):
     rng = np.random.default_rng(noise_seed)
     ud.dat.data[:] += noise_level * sigma_u * rng.normal(size=ud.dat.data.shape)
 
-    for bc in bcs:
+    for bc in bcs_i_v:
         bc.apply(ud)
 
-    u_i.interpolate(ud)
-    alpha_i.interpolate(Constant(1.5))
+    u_ifun.interpolate(ud)
+    alpha_ifun.interpolate(Constant(1.5))
     # -----------------------------
     # Inversion problem on inversion mesh
     # -----------------------------
 
     # Create initial guess
-    alpha_ifun.assign(1.5)
     # --- Forward-consistent u0 from PDE, then optional blend with data ---
     def solve_forward_u(alpha_guess):
         """Solve the forward equilibrium on the inversion mesh for a given alpha."""
@@ -247,7 +248,7 @@ def invscar(**params):
         w = csv.writer(f)
         w.writerow(["iter", "J", "rel_L2(alpha)", "rel_H1s(alpha)", "rel_L2(u)"])
         for k in range(len(J_hist)):
-            w.writerow([k, J_hist[k], err_alpha_L2_hist[k], err_alpha_H1s_hist[k], err_u_L2_hist[k]])
+            w.writerow([k, J_hist[k], err_alpha_L2_hist[k], err_u_L2_hist[k]])
 
     # Output handling
     ofile_name = str((run_dir / f"out.pvd").as_posix())
