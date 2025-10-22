@@ -57,9 +57,9 @@ def invscar(**params):
     # -----------------------------
     # Geometry: two meshes
     # -----------------------------
-    Nx_t = params.get('Nx_true', 40)
-    Ny_t = params.get('Ny_true', 40)
-    Nz_t = params.get('Nz_true', 20)
+    Nx_t = params.get('Nx_true', 80)
+    Ny_t = params.get('Ny_true', 80)
+    Nz_t = params.get('Nz_true', 40)
 
     Nx_i = params.get('Nx_inv', 20)
     Ny_i = params.get('Ny_inv', 20)

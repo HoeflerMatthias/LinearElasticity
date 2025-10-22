@@ -19,7 +19,7 @@ if __name__ == '__main__':
     base = dict(
         # geometry (truth vs inversion)
         #Nx_true=80, Ny_true=80, Nz_true=40,
-        Nx_inv=11,  Ny_inv=11,  Nz_inv=6,
+        Nx_inv=10,  Ny_inv=10,  Nz_inv=5,
         # physics
         lambda_=650.0, mu=8.0, p_load=10.0,
         # objective
@@ -36,4 +36,4 @@ if __name__ == '__main__':
         lam_reg=[1e-3],
     )
 
-    run_grid(out_root='/app/runs_odil', base_params=base, grid=grid, run_name_fmt=fmt)
+    run_grid(invscar, out_root='/app/runs_red', base_params=base, grid=grid, run_name_fmt=fmt)

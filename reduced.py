@@ -8,96 +8,11 @@ from pathlib import Path
 import json
 from types import SimpleNamespace
 
-from utils import load_data_csv_to_grid
+from utils import L2_error
 
-# ---------- CSV loader for forward/truth ----------
-REQUIRED_COLS = [
-    "x","y","z","ux","uy","uz","alpha",
-    "e_xx","e_xy","e_xz","e_yx","e_yy","e_yz","e_zx","e_zy","e_zz"
-]
-def load_forward_csv(path):
-    with open(path, "r", newline="") as f:
-        rdr = csv.DictReader(f)
-        missing = [c for c in REQUIRED_COLS if c not in rdr.fieldnames]
-        if missing:
-            raise ValueError(f"CSV is missing columns: {missing}")
-        X = []; U = []; A = []; E = []
-        for row in rdr:
-            X.append((float(row["x"]), float(row["y"]), float(row["z"])))
-            U.append((float(row["ux"]), float(row["uy"]), float(row["uz"])))
-            A.append(float(row["alpha"]))
-            E.append([float(row["e_xx"]), float(row["e_xy"]), float(row["e_xz"]),
-                      float(row["e_yx"]), float(row["e_yy"]), float(row["e_yz"]),
-                      float(row["e_zx"]), float(row["e_zy"]), float(row["e_zz"])])
-    pts  = np.asarray(X)                 # (M,3)
-    u    = np.asarray(U)                 # (M,3)
-    alpha= np.asarray(A)                 # (M,)
-    eps  = np.asarray(E).reshape(-1,3,3) # (M,3,3)
-    return pts, u, alpha, eps
-
-# ---------- helpers for metrics ----------
-def rel_L2_error_alpha(a, a_ref, mesh):
-    num = assemble((a - a_ref) ** 2 * dx(domain=mesh))
-    den = assemble(a_ref ** 2 * dx(domain=mesh))
-    return float(np.sqrt(num) / (np.sqrt(den) + 1e-16))
-
-def rel_L2_error_alpha2(a, a_ref, mesh):
-    # kept for compatibility (same as rel_L2_error_alpha)
-    return rel_L2_error_alpha(a, a_ref, mesh)
-
-def rel_H1s_error_alpha(a, a_ref, mesh):
-    num = assemble(inner(grad(a - a_ref), grad(a - a_ref)) * dx(domain=mesh))
-    den = assemble(inner(grad(a_ref), grad(a_ref)) * dx(domain=mesh))
-    return float(np.sqrt(num) / (np.sqrt(den) + 1e-16))
-
-def rel_L2_error_u(u, u_ref, mesh):
-    num = assemble(dot(u - u_ref, u - u_ref) * dx(domain=mesh))
-    den = assemble(dot(u_ref, u_ref) * dx(domain=mesh))
-    return float(np.sqrt(num) / (np.sqrt(den) + 1e-16))
+__all__ = ["invscar"]
 
 def invscar(**params):
-    """Solve the inverse scar problem (two-mesh setup with error tracking).
-
-    Parameters
-    ----------
-        # Geometry
-        Nx_true, Ny_true, Nz_true : ints, truth mesh divisions (default: 40,40,20)
-        Nx_inv,  Ny_inv,  Nz_inv  : ints, inversion mesh divisions (default: 20,20,10)
-        Lx, Ly, Lz                : floats, box size (default: 2.0, 2.0, 1.0)
-
-        # Material / physics
-        lambda_     : bulk modulus (Constant or float, default 650.0)
-        mu          : shear modulus (Constant or float, default 8.0)
-        p_load      : load magnitude (Constant or float, default 10.0)
-
-        # Truth contractility
-        alpha_gt    : callable `alpha_expr(x)` or UFL expr; default conditional(x[0] < x[1], 1, 2)
-
-        # Data & objective
-        noise_level : float (default 1e-2)
-        J_fide      : {'full','bcs'} (default 'full')
-        J_regu      : {'L2','H1','TV'} (default 'H1')
-        lmbda       : regularization weight (Constant or float, default 4e-8)
-        lower_bnd   : float lower bound (default 0)
-        upper_bnd   : float upper bound (default +inf)
-
-        # Solver / IO
-        bfgs_disp   : bool (default False)
-        ofile_name  : str or None for VTK (default: None -> auto-tag)
-        show_plot   : bool (default False, saves figures regardless)
-
-    Return
-    ------
-    A simple object `res` with fields:
-        res.u, res.alpha                : final inversion fields (on inversion mesh)
-        res.res                         : SciPy result object
-        res.u_true, res.alpha_true      : truth fields (on truth mesh)
-        res.alpha_true_on_inv, res.u_true_on_inv : truth fields sampled to inversion mesh
-        res.J_fid, res.J_reg            : objective terms at optimum
-        res.err_*_hist, res.err_*_final : error histories and finals (alpha L2/H1s, u L2)
-        res.J_hist                      : objective history
-        res.tag                         : filename tag encoding meshes and p_load
-    """
 
     # Geometry
     Nx_t = params.get('Nx_true', 80)
@@ -124,7 +39,10 @@ def invscar(**params):
     J_regu = params.get('J_regu', 'H1')
     lam_reg = Constant(params.get('lam_reg', 1e-3))
 
-    data_csv = params.get("data_csv", "linear_symcube_p10.csv")
+    lower_bnd = params.get('lower_bnd', 0.0)
+    upper_bnd = params.get('upper_bnd', np.inf)
+
+    data_csv = params.get("data_csv", "linear_symcube_p10.h5")
 
     # File handling
     tag = params.get('run_name', None)
@@ -182,46 +100,31 @@ def invscar(**params):
 
     ud = Function(V_i, name="displ_data")
 
-    u_true_on_inv = Function(V_i, name="u_true_on_inv")
-    alpha_true_on_inv = Function(Q_i, name="alpha_true_on_inv")
-
     u_i = Function(V_i, name="displacement")
     p_i = Function(V_i, name="adjoint")
     alpha_i = Function(Q_i, name="alpha")
 
     v_i = TestFunction(V_i)
 
-    # Truth problem (synthetic data)
-
     # --- load forward/ground-truth data from CSV ---
-    domain = SimpleNamespace(
-        cshape=(Nx_i, Ny_i, Nz_i),
-        points_1d=lambda: (np.linspace(0, Lx, Nx_i),
-                           np.linspace(0, Ly, Ny_i),
-                           np.linspace(0, Lz, Nz_i))
-    )
-    u_data, a_data, data_E, mask = load_data_csv_to_grid(domain, data_csv, noise_level=noise_level, noise_seed=noise_seed)
+    with CheckpointFile(data_csv, "r") as chk:
+        mm_true = chk.load_mesh()
+        alpha_t = chk.load_function(mm_true, name="alpha_true")
+        u_t = chk.load_function(mm_true, name="u_true")
 
-    alpha_t.dat.data = a_data
-    u_t.dat.data = u_data
-
-    # measurements on inversion mesh
     ud.interpolate(u_t)
 
-    # truth on inversion mesh (for metrics)
-    alpha_true_on_inv.interpolate(alpha_t)
-    u_true_on_inv.interpolate(u_t)
+    sigma_u = np.max(np.abs(ud.dat.data_ro), axis=0) / 3
 
-    # Add noise and re-apply constrained DOFs
-    sigma_u = np.max(np.abs(ud.dat.data_ro),axis=0)/3
-
-    # allow deterministic noise via seed
     rng = np.random.default_rng(noise_seed)
     ud.dat.data[:] += noise_level * sigma_u * rng.normal(size=ud.dat.data.shape)
+
     for bc in bcs:
         bc.apply(ud)
 
     u_i.interpolate(ud)
+    alpha_i.interpolate(Constant(1.5))
+
     # -----------------------------
     # Inversion problem on inversion mesh
     # -----------------------------
@@ -245,10 +148,10 @@ def invscar(**params):
 
     J_fide = params.get('J_fide', 'full')
     J_regu = params.get('J_regu', 'H1')
-    J_f = {'full': J_ful, 'bcs': J_bcs}[J_fide]
+
     J_R = {'L2': R_L2, 'H1': R_H1, 'TV': R_TV}[J_regu]
 
-    J  = J_f(u_i - ud) + lam_reg * J_R(alpha_i)
+    J  = J_ful(u_i - ud) + lam_reg * J_R(alpha_i)
     dJ = lam_reg * derivative(J_R(alpha_i), alpha_i) + derivative(action(G, p_i), alpha_i)
 
     # Adjoint
@@ -265,11 +168,8 @@ def invscar(**params):
     # -----------------------------
     # Optimization
     # -----------------------------
-    alpha_i.interpolate(Constant(1.5))
     x0 = alpha_i.dat.data_ro.copy()
 
-    lower_bnd = params.get('lower_bnd', 0.0)
-    upper_bnd = params.get('upper_bnd', np.inf)
     lb = np.full_like(x0, lower_bnd)
     ub = np.full_like(x0, upper_bnd)
     bnds = np.array([lb, ub]).T
@@ -297,8 +197,8 @@ def invscar(**params):
         if state["k"] % 50 == 0:
             fwd_solver.solve()
             J_hist.append(assemble(J))
-            err_alpha_L2_hist.append(rel_L2_error_alpha(alpha_i, alpha_true_on_inv, mm_inv))
-            err_u_L2_hist.append(rel_L2_error_u(u_i, u_true_on_inv, mm_inv))
+            err_alpha_L2_hist.append(L2_error(alpha_i, alpha_t))
+            err_u_L2_hist.append(L2_error(u_i, u_t, rel=False))
             ofile.write(u_i, alpha_i, time=state["k"])
 
     # initial metrics
@@ -313,8 +213,8 @@ def invscar(**params):
     # -----------------------------
     # Final metrics and splits
     # -----------------------------
-    final_alpha_L2 = rel_L2_error_alpha(alpha_i, alpha_true_on_inv, mm_inv)
-    final_u_L2 = rel_L2_error_u(u_i, u_true_on_inv, mm_inv)
+    final_alpha_L2 = rel_L2_error(alpha_i, alpha_true_on_inv)
+    final_u_L2 = rel_L2_error(u_i, u_true_on_inv)
 
     J_fid = float(assemble(J_f(u_i - ud)))
     J_reg = float(assemble(J_R(alpha_i)))
@@ -324,9 +224,9 @@ def invscar(**params):
     # -----------------------------
     with open((run_dir / f"reconstruction_metrics_{tag}.csv").as_posix(), "w", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["iter", "J", "rel_L2(alpha)", "rel_L2(u)"])
+        w.writerow(["iter", "J", "rel_L2(alpha)", "L2(u)"])
         for k in range(len(J_hist)):
-            w.writerow([k, J_hist[k], err_alpha_L2_hist[k], err_alpha_H1s_hist[k], err_u_L2_hist[k]])
+            w.writerow([k, J_hist[k], err_alpha_L2_hist[k], err_u_L2_hist[k]])
 
     # -----------------------------
     # Package result (same fields as kkt.py)
@@ -340,18 +240,13 @@ def invscar(**params):
     result.res = res
     result.u_true = u_t
     result.alpha_true = alpha_t
-    result.u_true_on_inv = u_true_on_inv
-    result.alpha_true_on_inv = alpha_true_on_inv
     result.J_fid = J_fid
     result.J_reg = J_reg
 
     result.err_alpha_L2_hist = err_alpha_L2_hist
-    result.err_alpha_H1s_hist = err_alpha_H1s_hist
     result.err_u_L2_hist = err_u_L2_hist
     result.J_hist = J_hist
     result.err_alpha_L2_final = final_alpha_L2
-    result.err_alpha_L2_final2 = final_alpha_L22
-    result.err_alpha_H1s_final = final_alpha_H1s
     result.err_u_L2_final = final_u_L2
 
     result.tag = tag
@@ -364,7 +259,7 @@ def invscar(**params):
             'tag', 'run_dir', 'Nx_true', 'Ny_true', 'Nz_true', 'Nx_inv', 'Ny_inv', 'Nz_inv',
             'lambda_', 'mu', 'p_load', 'J_fide', 'J_regu', 'lmbda', 'noise_level',
             'J_fid', 'J_reg',
-            'rel_L2_alpha_final', 'rel_L2_u_final',
+            'rel_L2_alpha_final', 'L2_u_final',
             'nit', 'nfev', 'njev', 'success'
         ]
         row = [
@@ -387,4 +282,4 @@ def invscar(**params):
 
 if __name__ == "__main__":
     # quick test run
-    invscar(J_fide='full', J_regu='H1')
+    invscar()

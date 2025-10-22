@@ -36,4 +36,4 @@ if __name__ == '__main__':
         lam_reg=[1e-3],
     )
 
-    run_grid(out_root='/app/runs_odil', base_params=base, grid=grid, run_name_fmt=fmt)
+    run_grid(invscar, out_root='/app/runs_odil', base_params=base, grid=grid, run_name_fmt=fmt)

@@ -10,50 +10,7 @@ from petsc4py import PETSc
 
 __all__ = ["invscar"]
 
-
 def invscar(**params):
-    """Solve the inverse scar problem (two-mesh setup with error tracking).
-
-    Parameters
-    ----------
-        # Geometry
-        Nx_true, Ny_true, Nz_true : ints, truth mesh divisions (default: 40,40,20)
-        Nx_inv,  Ny_inv,  Nz_inv  : ints, inversion mesh divisions (default: 20,20,10)
-        Lx, Ly, Lz                : floats, box size (default: 2.0, 2.0, 1.0)
-
-        # Material / physics
-        lambda_     : bulk modulus (Constant or float, default 650.0)
-        mu          : shear modulus (Constant or float, default 8.0)
-        p_load      : load magnitude (Constant or float, default 10.0)
-
-        # Truth contractility
-        alpha_gt    : callable `alpha_expr(x)` or UFL expr; default conditional(x[0] < x[1], 1, 2)
-
-        # Data & objective
-        noise_level : float (default 1e-2)
-        J_fide      : {'full','bcs'} (default 'full')
-        J_regu      : {'L2','H1','TV'} (default 'H1')
-        lmbda       : regularization weight (Constant or float, default 4e-8)
-        lower_bnd   : float lower bound (default 0)
-        upper_bnd   : float upper bound (default +inf)
-
-        # Solver / IO
-        bfgs_disp   : bool (default False)
-        ofile_name  : str or None for VTK (default: None -> auto-tag)
-        show_plot   : bool (default False, saves figures regardless)
-
-    Return
-    ------
-    A simple object `res` with fields:
-        res.u, res.alpha                : final inversion fields (on inversion mesh)
-        res.res                         : SciPy result object
-        res.u_true, res.alpha_true      : truth fields (on truth mesh)
-        res.alpha_true_on_inv, res.u_true_on_inv : truth fields sampled to inversion mesh
-        res.J_fid, res.J_reg            : objective terms at optimum
-        res.err_*_hist, res.err_*_final : error histories and finals (alpha L2/H1s, u L2)
-        res.J_hist                      : objective history
-        res.tag                         : filename tag encoding meshes and p_load
-    """
 
     # Geometry
     Nx_t = params.get('Nx_true', 80)
@@ -172,22 +129,26 @@ def invscar(**params):
 
     G_t = derivative(W_t, u_t)
 
-    # Ground-truth solution
-    fwd_prob_t = NonlinearVariationalProblem(G_t, u_t, bcs_t, form_compiler_parameters={'quadrature_degree': 2})
-    fwd_solver_t = NonlinearVariationalSolver(fwd_prob_t)
-    fwd_solver_t.solve()
+    # --- load forward/ground-truth data from CSV ---
+    with CheckpointFile(data_csv, "r") as chk:
+        chk.load_function(alpha_t)
+        chk.load_function(u_t)
 
-    # Transfer data to inversion mesh (nodal sampling)
     ud.interpolate(u_t)
 
-    # Add noise and re-apply constrained DOFs
     sigma_u = np.max(np.abs(ud.dat.data_ro), axis=0) / 3
 
     rng = np.random.default_rng(noise_seed)
     ud.dat.data[:] += noise_level * sigma_u * rng.normal(size=ud.dat.data.shape)
 
-    for bc in bcs_i_v:
+    for bc in bcs:
         bc.apply(ud)
+
+    u_i.interpolate(ud)
+    alpha_i.interpolate(Constant(1.5))
+    # -----------------------------
+    # Inversion problem on inversion mesh
+    # -----------------------------
 
     # Create initial guess
     alpha_ifun.assign(1.5)
@@ -233,14 +194,9 @@ def invscar(**params):
     J = adjoint + control + state
 
     # Solve inverse problem
-    # --- truth on inversion mesh for error metrics ---
-    alpha_true_on_inv = Function(Q_i, name="alpha_true_on_inv")
-    alpha_true_on_inv.interpolate(conditional(x_i[0] < x_i[1], 1.0, 2.0))
-    u_true_on_inv = Function(V_i, name="u_true_on_inv")
-    u_true_on_inv.interpolate(u_t)
 
     # --- metric accumulators ---
-    J_hist, err_alpha_L2_hist, err_alpha_H1s_hist, err_u_L2_hist = [], [], [], []
+    J_hist, err_alpha_L2_hist, err_u_L2_hist = [], [], []
 
     def compute_objective_terms(u_fun, alpha_fun):
         # data misfit
@@ -256,22 +212,6 @@ def invscar(**params):
             l2 = 0.5 * assemble(alpha_fun ** 2 * dx(domain=mm_inv))
             J_reg = float(lam_reg) * tv + 1e-2 * l2
         return J_fid, J_reg
-
-    def compute_errors(u_fun, alpha_fun):
-        # relative L2(alpha)
-        num = sqrt(assemble((alpha_fun - alpha_true_on_inv) ** 2 * dx(domain=mm_inv)))
-        den = sqrt(assemble(alpha_true_on_inv ** 2 * dx(domain=mm_inv))) + 1e-16
-        rel_L2_alpha = float(num / den)
-        # relative H1 seminorm(alpha)
-        num_h1 = sqrt(assemble(inner(grad(alpha_fun - alpha_true_on_inv),
-                                     grad(alpha_fun - alpha_true_on_inv)) * dx(domain=mm_inv)))
-        den_h1 = sqrt(assemble(inner(grad(alpha_true_on_inv), grad(alpha_true_on_inv)) * dx(domain=mm_inv))) + 1e-16
-        rel_H1s_alpha = float(num_h1 / den_h1)
-        # relative L2(u)
-        num_u = sqrt(assemble(inner(u_fun - u_true_on_inv, u_fun - u_true_on_inv) * dx(domain=mm_inv)))
-        den_u = sqrt(assemble(inner(u_true_on_inv, u_true_on_inv) * dx(domain=mm_inv))) + 1e-16
-        rel_L2_u = float(num_u / den_u)
-        return rel_L2_alpha, rel_H1s_alpha, rel_L2_u
 
     # Build problem/solver so we can hook a monitor
     prob = NonlinearVariationalProblem(J, w_i, bcs=bcs_i_w,
@@ -292,13 +232,13 @@ def invscar(**params):
     def _monitor(snes, it, rnorm):
         J_fid, J_reg = compute_objective_terms(u_ifun, alpha_ifun)
         J_total = float(J_fid + J_reg)
-        rel_L2_a, rel_H1s_a, rel_L2_u = compute_errors(u_ifun, alpha_ifun)
+        rel_L2_a = L2_error(alpha_ifun, alpha_t)
+        rel_L2_u = L2_error(u_ifun, u_t, rel=False)
         J_hist.append(J_total)
         err_alpha_L2_hist.append(rel_L2_a)
-        err_alpha_H1s_hist.append(rel_H1s_a)
         err_u_L2_hist.append(rel_L2_u)
         PETSc.Sys.Print(f"[it {it:02d}] ||F||={rnorm:8.2e}  J={J_total:10.4e}  "
-                        f"relL2(a)={rel_L2_a:7.3e}  relH1s(a)={rel_H1s_a:7.3e}  relL2(u)={rel_L2_u:7.3e}")
+                        f"relL2(a)={rel_L2_a:7.3e}  relL2(u)={rel_L2_u:7.3e}")
 
     solver.snes.setMonitor(_monitor)
     solver.solve()
@@ -307,8 +247,8 @@ def invscar(**params):
     J_fid, J_reg = compute_objective_terms(u_ifun, alpha_ifun)
 
     # final errors
-    final_alpha_L2, final_alpha_H1s, final_u_L2 = compute_errors(u_ifun, alpha_ifun)
-    final_alpha_L22 = final_alpha_L2  # keep the extra field name for compatibility
+    final_alpha_L2 = L2_error(alpha_ifun, alpha_t)
+    final_u_L2 = L2_error(u_ifun, u_t, rel=False)
 
     # CSV export (per-iteration history)
     with open((run_dir / f"reconstruction_metrics_{tag}.csv").as_posix(), "w", newline="") as f:
@@ -332,18 +272,13 @@ def invscar(**params):
     result.res = None
     result.u_true = u_t
     result.alpha_true = alpha_t
-    result.u_true_on_inv = u_true_on_inv
-    result.alpha_true_on_inv = alpha_true_on_inv
     result.J_fid = float(J_fid)
     result.J_reg = float(J_reg)
 
     result.err_alpha_L2_hist = err_alpha_L2_hist
-    result.err_alpha_H1s_hist = err_alpha_H1s_hist
     result.err_u_L2_hist = err_u_L2_hist
     result.J_hist = J_hist
     result.err_alpha_L2_final = final_alpha_L2
-    result.err_alpha_L2_final2 = final_alpha_L22
-    result.err_alpha_H1s_final = final_alpha_H1s
     result.err_u_L2_final = final_u_L2
 
     result.tag = tag

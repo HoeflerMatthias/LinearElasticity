@@ -48,79 +48,6 @@ def particles_to_field_3d_average(up, tx, ty, tz, domain):
 
     return u_average
 
-def load_data_csv_to_grid(domain, path, mu_scale=8.0, dtype=np.float32, noise_level=0.0, noise_seed=1234):
-    """
-    CSV columns required:
-      x,y,z,ux,uy,uz,alpha,e_xx,e_xy,e_xz,e_yx,e_yy,e_yz,e_zx,e_zy,e_zz
-    Returns:
-      data_u  : (Nx,Ny,Nz,3)
-      data_mu : (Nx,Ny,Nz)
-      data_E  : (Nx,Ny,Nz,3,3)  # optional (not used in loss)
-      mask    : (Nx,Ny,Nz) with 1 where data present, else 0
-    """
-
-    arr = _np.genfromtxt(path, delimiter=",", names=True)
-    names = [n.lower() for n in arr.dtype.names]
-    need = lambda cols: all(c in names for c in cols)
-    assert need(["x", "y", "z", "ux", "uy", "uz", "alpha"]), "CSV missing required columns"
-
-    Nx, Ny, Nz = domain.cshape
-    x1, y1, z1 = domain.points_1d()
-
-    if noise_level > 0.0:
-        # Add noise and re-apply constrained DOFs
-        u = np.stack([arr["ux"], arr["uy"], arr["uz"]], axis=-1).astype(dtype)
-        sigma_u = np.max(np.abs(u), axis=0) / 3
-
-        rng = np.random.default_rng(noise_seed)
-        u += noise_level * sigma_u * rng.normal(size=u.shape)
-        arr["ux"] = u[:, 0]
-        arr["uy"] = u[:, 1]
-        arr["uz"] = u[:, 2]
-
-    def nearest_idx(grid, q):
-        idx = _np.searchsorted(grid, q)
-        idx = _np.clip(idx, 1, len(grid) - 1)
-        left = grid[idx - 1];
-        right = grid[idx]
-        idx = _np.where(_np.abs(q - left) <= _np.abs(q - right), idx - 1, idx)
-        return idx.astype(_np.int64)
-
-    I = nearest_idx(x1, arr["x"])
-    J = nearest_idx(y1, arr["y"])
-    K = nearest_idx(z1, arr["z"])
-
-    data_u = _np.zeros((Nx, Ny, Nz, 3), dtype=dtype)
-    data_mu = _np.zeros((Nx, Ny, Nz), dtype=dtype)
-    mask = _np.zeros((Nx, Ny, Nz), dtype=dtype)
-
-    data_u[I, J, K, 0] = arr["ux"].astype(dtype)
-    data_u[I, J, K, 1] = arr["uy"].astype(dtype)
-    data_u[I, J, K, 2] = arr["uz"].astype(dtype)
-    data_mu[I, J, K] = (arr["alpha"].astype(dtype) * mu_scale)
-
-    #ux = particles_to_field_3d_average(arr["ux"], arr["x"], arr["y"], arr["z"], domain)
-    #uy = particles_to_field_3d_average(arr["ux"], arr["x"], arr["y"], arr["z"], domain)
-    #uz = particles_to_field_3d_average(arr["ux"], arr["x"], arr["y"], arr["z"], domain)
-    #data_u = tf.stack([ux, uy, uz], axis=-1)
-
-    mask[I, J, K] = 1
-
-    data_E = None
-    if need(["e_xx", "e_xy", "e_xz", "e_yx", "e_yy", "e_yz", "e_zx", "e_zy", "e_zz"]):
-        data_E = _np.zeros((Nx, Ny, Nz, 3, 3), dtype=dtype)
-        data_E[I, J, K, 0, 0] = arr["e_xx"];
-        data_E[I, J, K, 0, 1] = arr["e_xy"];
-        data_E[I, J, K, 0, 2] = arr["e_xz"]
-        data_E[I, J, K, 1, 0] = arr["e_yx"];
-        data_E[I, J, K, 1, 1] = arr["e_yy"];
-        data_E[I, J, K, 1, 2] = arr["e_yz"]
-        data_E[I, J, K, 2, 0] = arr["e_zx"];
-        data_E[I, J, K, 2, 1] = arr["e_zy"];
-        data_E[I, J, K, 2, 2] = arr["e_zz"]
-
-    return data_u, data_mu, data_E, mask
-
 def _grid_connectivity_hexa(nx, ny, nz):
     """8-node hex connectivity for a structured (nx,ny,nz) *node* grid, i-fastest."""
     def idx(i, j, k):
@@ -216,3 +143,76 @@ def plot_losses_from_csv(csv_path, out_png=None, columns=None, logy=True):
     fig.savefig(out_png, dpi=150)
     plt.close(fig)
     return str(out_png), ycols
+
+def load_data_csv_to_grid(domain, path, mu_scale=8.0, dtype=np.float32, noise_level=0.0, noise_seed=1234):
+    """
+    CSV columns required:
+      x,y,z,ux,uy,uz,alpha,e_xx,e_xy,e_xz,e_yx,e_yy,e_yz,e_zx,e_zy,e_zz
+    Returns:
+      data_u  : (Nx,Ny,Nz,3)
+      data_mu : (Nx,Ny,Nz)
+      data_E  : (Nx,Ny,Nz,3,3)  # optional (not used in loss)
+      mask    : (Nx,Ny,Nz) with 1 where data present, else 0
+    """
+
+    arr = np.genfromtxt(path, delimiter=",", names=True)
+    names = [n.lower() for n in arr.dtype.names]
+    need = lambda cols: all(c in names for c in cols)
+    assert need(["x", "y", "z", "ux", "uy", "uz", "alpha"]), "CSV missing required columns"
+
+    Nx, Ny, Nz = domain.cshape
+    x1, y1, z1 = domain.points_1d()
+
+    if noise_level > 0.0:
+        # Add noise and re-apply constrained DOFs
+        u = np.stack([arr["ux"], arr["uy"], arr["uz"]], axis=-1).astype(dtype)
+        sigma_u = np.max(np.abs(u), axis=0) / 3
+
+        rng = np.random.default_rng(noise_seed)
+        u += noise_level * sigma_u * rng.normal(size=u.shape)
+        arr["ux"] = u[:, 0]
+        arr["uy"] = u[:, 1]
+        arr["uz"] = u[:, 2]
+
+    def nearest_idx(grid, q):
+        idx = np.searchsorted(grid, q)
+        idx = np.clip(idx, 1, len(grid) - 1)
+        left = grid[idx - 1];
+        right = grid[idx]
+        idx = np.where(np.abs(q - left) <= np.abs(q - right), idx - 1, idx)
+        return idx.astype(np.int64)
+
+    I = nearest_idx(x1, arr["x"])
+    J = nearest_idx(y1, arr["y"])
+    K = nearest_idx(z1, arr["z"])
+
+    data_u = np.zeros((Nx, Ny, Nz, 3), dtype=dtype)
+    data_mu = np.zeros((Nx, Ny, Nz), dtype=dtype)
+    mask = np.zeros((Nx, Ny, Nz), dtype=dtype)
+
+    data_u[I, J, K, 0] = arr["ux"].astype(dtype)
+    data_u[I, J, K, 1] = arr["uy"].astype(dtype)
+    data_u[I, J, K, 2] = arr["uz"].astype(dtype)
+    data_mu[I, J, K] = (arr["alpha"].astype(dtype) * mu_scale)
+
+    #ux = particles_to_field_3d_average(arr["ux"], arr["x"], arr["y"], arr["z"], domain)
+    #uy = particles_to_field_3d_average(arr["ux"], arr["x"], arr["y"], arr["z"], domain)
+    #uz = particles_to_field_3d_average(arr["ux"], arr["x"], arr["y"], arr["z"], domain)
+    #data_u = tf.stack([ux, uy, uz], axis=-1)
+
+    mask[I, J, K] = 1
+
+    data_E = None
+    if need(["e_xx", "e_xy", "e_xz", "e_yx", "e_yy", "e_yz", "e_zx", "e_zy", "e_zz"]):
+        data_E = np.zeros((Nx, Ny, Nz, 3, 3), dtype=dtype)
+        data_E[I, J, K, 0, 0] = arr["e_xx"];
+        data_E[I, J, K, 0, 1] = arr["e_xy"];
+        data_E[I, J, K, 0, 2] = arr["e_xz"]
+        data_E[I, J, K, 1, 0] = arr["e_yx"];
+        data_E[I, J, K, 1, 1] = arr["e_yy"];
+        data_E[I, J, K, 1, 2] = arr["e_yz"]
+        data_E[I, J, K, 2, 0] = arr["e_zx"];
+        data_E[I, J, K, 2, 1] = arr["e_zy"];
+        data_E[I, J, K, 2, 2] = arr["e_zz"]
+
+    return data_u, data_mu, data_E, mask
