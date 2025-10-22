@@ -15,5 +15,3 @@ RUN python -m pip install --no-cache-dir keras tensorflow
 
 RUN python -m pip install --no-cache-dir -r requirements.odil.txt
 
-# no source copied; run with a mount
-ENTRYPOINT ["bash"]
