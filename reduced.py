@@ -6,7 +6,9 @@ import csv
 import os
 from pathlib import Path
 import json
-from scipy.spatial import cKDTree
+from types import SimpleNamespace
+
+from utils import load_data_csv_to_grid
 
 # ---------- CSV loader for forward/truth ----------
 REQUIRED_COLS = [
@@ -192,14 +194,16 @@ def invscar(**params):
     # Truth problem (synthetic data)
 
     # --- load forward/ground-truth data from CSV ---
-    pts_data, u_data, a_data, eps_data = load_forward_csv(data_csv)
+    domain = SimpleNamespace(
+        cshape=(Nx_i, Ny_i, Nz_i),
+        points_1d=lambda: (np.linspace(0, Lx, Nx_i),
+                           np.linspace(0, Ly, Ny_i),
+                           np.linspace(0, Lz, Nz_i))
+    )
+    u_data, a_data, data_E, mask = load_data_csv_to_grid(domain, data_csv, noise_level=noise_level, noise_seed=noise_seed)
 
-    coords_true = mm_true.coordinates.dat.data_ro  # (Nt, 3)
-    kdt = cKDTree(pts_data)
-    _, idx_t = kdt.query(coords_true, k=1)
-
-    alpha_t.dat.data[:] = a_data[idx_t]
-    u_t.dat.data[:] = u_data[idx_t]
+    alpha_t.dat.data = a_data
+    u_t.dat.data = u_data
 
     # measurements on inversion mesh
     ud.interpolate(u_t)
@@ -255,7 +259,6 @@ def invscar(**params):
 
     # Histories
     err_alpha_L2_hist  = []
-    err_alpha_H1s_hist = []
     err_u_L2_hist      = []
     J_hist             = []
 
@@ -295,7 +298,6 @@ def invscar(**params):
             fwd_solver.solve()
             J_hist.append(assemble(J))
             err_alpha_L2_hist.append(rel_L2_error_alpha(alpha_i, alpha_true_on_inv, mm_inv))
-            err_alpha_H1s_hist.append(rel_H1s_error_alpha(alpha_i, alpha_true_on_inv, mm_inv))
             err_u_L2_hist.append(rel_L2_error_u(u_i, u_true_on_inv, mm_inv))
             ofile.write(u_i, alpha_i, time=state["k"])
 
@@ -312,8 +314,6 @@ def invscar(**params):
     # Final metrics and splits
     # -----------------------------
     final_alpha_L2 = rel_L2_error_alpha(alpha_i, alpha_true_on_inv, mm_inv)
-    final_alpha_L22 = rel_L2_error_alpha2(alpha_i, alpha_true_on_inv, mm_inv)
-    final_alpha_H1s = rel_H1s_error_alpha(alpha_i, alpha_true_on_inv, mm_inv)
     final_u_L2 = rel_L2_error_u(u_i, u_true_on_inv, mm_inv)
 
     J_fid = float(assemble(J_f(u_i - ud)))
@@ -324,7 +324,7 @@ def invscar(**params):
     # -----------------------------
     with open((run_dir / f"reconstruction_metrics_{tag}.csv").as_posix(), "w", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["iter", "J", "rel_L2(alpha)", "rel_H1s(alpha)", "rel_L2(u)"])
+        w.writerow(["iter", "J", "rel_L2(alpha)", "rel_L2(u)"])
         for k in range(len(J_hist)):
             w.writerow([k, J_hist[k], err_alpha_L2_hist[k], err_alpha_H1s_hist[k], err_u_L2_hist[k]])
 
@@ -364,14 +364,14 @@ def invscar(**params):
             'tag', 'run_dir', 'Nx_true', 'Ny_true', 'Nz_true', 'Nx_inv', 'Ny_inv', 'Nz_inv',
             'lambda_', 'mu', 'p_load', 'J_fide', 'J_regu', 'lmbda', 'noise_level',
             'J_fid', 'J_reg',
-            'rel_L2_alpha_final', 'rel_L2_alpha_final2', 'rel_H1s_alpha_final', 'rel_L2_u_final',
+            'rel_L2_alpha_final', 'rel_L2_u_final',
             'nit', 'nfev', 'njev', 'success'
         ]
         row = [
             tag, str(run_dir), Nx_t, Ny_t, Nz_t, Nx_i, Ny_i, Nz_i,
             float(lambda_), float(mu), float(p_load), J_fide, J_regu, float(lam_reg), noise_level,
             float(J_fid), float(J_reg),
-            float(final_alpha_L2), float(final_alpha_L22), float(final_alpha_H1s), float(final_u_L2),
+            float(final_alpha_L2), float(final_u_L2),
             getattr(res, 'nit', None), getattr(res, 'nfev', None), getattr(res, 'njev', None),
             getattr(res, 'success', None)
         ]

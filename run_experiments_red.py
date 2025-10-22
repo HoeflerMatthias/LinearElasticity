@@ -6,7 +6,7 @@ import json
 import os
 
 from utils import run_grid
-from aao_odil import invscar
+from reduced import invscar
 
 def fmt(p):
     return (f"reg{p['J_regu']}_lam{p['lam_reg']}_"

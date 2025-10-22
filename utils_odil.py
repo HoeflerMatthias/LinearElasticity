@@ -1,6 +1,52 @@
 import numpy as np
 import meshio
 from pathlib import Path
+import tensorflow as tf
+
+def particles_to_field_3d_average(up, tx, ty, tz, domain):
+    dx = domain.step('x')
+    dy = domain.step('y')
+    dz = domain.step('z')
+    nx = domain.size('x')
+    ny = domain.size('y')
+    nz = domain.size('z')
+
+    # Clip the trajectories within the domain boundaries
+    tx = tf.clip_by_value(tx, domain.lower[0], domain.upper[0])
+    ty = tf.clip_by_value(ty, domain.lower[1], domain.upper[1])
+    tz = tf.clip_by_value(tz, domain.lower[2], domain.upper[2])
+
+    # Calculate nearest grid indices
+    ix = tf.cast(tf.round((tx - domain.lower[0]) / dx), tf.int32)
+    iy = tf.cast(tf.round((ty - domain.lower[1]) / dy), tf.int32)
+    iz = tf.cast(tf.round((tz - domain.lower[2]) / dz), tf.int32)
+
+    # Ensure indices are within bounds
+    ix = tf.clip_by_value(ix, 0, nx - 1)
+    iy = tf.clip_by_value(iy, 0, ny - 1)
+    iz = tf.clip_by_value(iz, 0, nz - 1)
+
+    # Flatten the indices to 1D to simplify aggregation
+    flat_indices = tf.stack([ix, iy, iz], axis=-1)
+
+    # Initialize the output grid
+    u = tf.zeros((nx, ny, nz), dtype=up.dtype)
+
+    # Handling multiple particles mapped to the same grid point by averaging their contributions
+    # Step 1: Create a tensor of ones to use for counting particle contributions per grid cell
+    ones = tf.ones_like(up)
+
+    # Step 2: Aggregate contributions and counts
+    u = tf.tensor_scatter_nd_add(u, flat_indices, up)
+    counts = tf.tensor_scatter_nd_add(tf.zeros((nx, ny, nz), dtype=up.dtype), flat_indices, ones)
+
+    # Avoid division by zero by setting zero counts to one (or handle differently as needed)
+    counts = tf.where(counts == 0, tf.ones_like(counts), counts)
+
+    # Step 3: Compute the average by dividing the sum of contributions by the count
+    u_average = u / counts
+
+    return u_average
 
 def load_data_csv_to_grid(domain, path, mu_scale=8.0, dtype=np.float32, noise_level=0.0, noise_seed=1234):
     """
@@ -12,7 +58,6 @@ def load_data_csv_to_grid(domain, path, mu_scale=8.0, dtype=np.float32, noise_le
       data_E  : (Nx,Ny,Nz,3,3)  # optional (not used in loss)
       mask    : (Nx,Ny,Nz) with 1 where data present, else 0
     """
-    import numpy as _np
 
     arr = _np.genfromtxt(path, delimiter=",", names=True)
     names = [n.lower() for n in arr.dtype.names]
@@ -53,6 +98,12 @@ def load_data_csv_to_grid(domain, path, mu_scale=8.0, dtype=np.float32, noise_le
     data_u[I, J, K, 1] = arr["uy"].astype(dtype)
     data_u[I, J, K, 2] = arr["uz"].astype(dtype)
     data_mu[I, J, K] = (arr["alpha"].astype(dtype) * mu_scale)
+
+    #ux = particles_to_field_3d_average(arr["ux"], arr["x"], arr["y"], arr["z"], domain)
+    #uy = particles_to_field_3d_average(arr["ux"], arr["x"], arr["y"], arr["z"], domain)
+    #uz = particles_to_field_3d_average(arr["ux"], arr["x"], arr["y"], arr["z"], domain)
+    #data_u = tf.stack([ux, uy, uz], axis=-1)
+
     mask[I, J, K] = 1
 
     data_E = None
