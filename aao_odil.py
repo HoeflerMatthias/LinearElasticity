@@ -40,24 +40,38 @@ def gradient(tensor, step, axis, final_op=False):
     # Central difference in the interior of the domain
     gradient = (tensor_after - tensor_before) / (2 * step)
 
+    def grad_left(f0,f1,f2,step):
+        return (-3.0*f0 + 4.0*f1 - f2) / (2.0*step)
+    def grad_right(fn,fnm1,fnm2,step):
+        return (3.0*fn - 4.0*fnm1 + fnm2) / (2.0*step)
+
     if axis == 0:
         # Forward difference at the left boundary and backward difference at the right boundary
-        gradient_left = (tensor[1, :, :] - tensor[0, :, :]) / step
-        gradient_right = (tensor[-1, :, :] - tensor[-2, :, :]) / step
+        #gradient_left = (tensor[1, :, :] - tensor[0, :, :]) / step
+        #gradient_right = (tensor[-1, :, :] - tensor[-2, :, :]) / step
+        gradient_left = grad_left(tensor[0, :, :], tensor[1, :, :], tensor[2, :, :], step)
+        gradient_right = grad_right(tensor[-1, :, :], tensor[-2, :, :], tensor[-3, :, :], step)
+
         gradient = tf.concat([gradient_left[None, :, :], gradient[1:-1, :, :], gradient_right[None, :, :]],
                              axis=axis)
 
     elif axis == 1:
         # Forward difference at the top boundary and backward difference at the bottom boundary
-        gradient_top = (tensor[:, 1, :] - tensor[:, 0, :]) / step
-        gradient_bottom = (tensor[:, -1, :] - tensor[:, -2, :]) / step
+        #gradient_top = (tensor[:, 1, :] - tensor[:, 0, :]) / step
+        #gradient_bottom = (tensor[:, -1, :] - tensor[:, -2, :]) / step
+        gradient_top = grad_left(tensor[:, 0, :], tensor[:, 1, :], tensor[:, 2, :], step)
+        gradient_bottom = grad_right(tensor[:, -1, :], tensor[:, -2, :], tensor[:, -3, :], step)
+
         gradient = tf.concat([gradient_top[:, None, :], gradient[:, 1:-1, :], gradient_bottom[:, None, :]],
                              axis=axis)
 
     elif axis == 2:
         # Forward difference at the front boundary and backward difference at the back boundary
-        gradient_front = (tensor[:, :, 1] - tensor[:, :, 0]) / step
-        gradient_back = (tensor[:, :, -1] - tensor[:, :, -2]) / step
+        #gradient_front = (tensor[:, :, 1] - tensor[:, :, 0]) / step
+        #gradient_back = (tensor[:, :, -1] - tensor[:, :, -2]) / step
+        gradient_front = grad_left(tensor[:, :, 0], tensor[:, :, 1], tensor[:, :, 2], step)
+        gradient_back = grad_right(tensor[:, :, -1], tensor[:, :, -2], tensor[:, :, -3], step)
+
         gradient = tf.concat([gradient_front[:, :, None], gradient[:, :, 1:-1], gradient_back[:, :, None]],
                              axis=axis)
 
@@ -120,6 +134,51 @@ def compute_stress(E, lambda_, mu):
     mue = tf.broadcast_to(mu, E.shape)
     sigma = lambda_ * trace_E * I + 2 * mue * E
     return sigma
+
+def compute_div_stress(E, lambda_, mu, dx, dy, dz):
+
+    E_xx_x = gradient(E[0,0,...], dx, axis=0)
+    E_xx_y = gradient(E[0,0,...], dy, axis=1)
+    E_xx_z = gradient(E[0,0,...], dz, axis=2)
+
+    E_yy_x = gradient(E[1,1,...], dx, axis=0)
+    E_yy_y = gradient(E[1,1,...], dy, axis=1)
+    E_yy_z = gradient(E[1,1,...], dz, axis=2)
+
+    E_zz_x = gradient(E[2,2,...], dx, axis=0)
+    E_zz_y = gradient(E[2,2,...], dy, axis=1)
+    E_zz_z = gradient(E[2,2,...], dz, axis=2)
+
+    trE_x = E_xx_x + E_yy_x + E_zz_x
+    trE_y = E_xx_y + E_yy_y + E_zz_y
+    trE_z = E_xx_z + E_yy_z + E_zz_z
+
+    div1 = lambda_ * tf.stack([trE_x, trE_y, trE_z], axis=0)
+
+    mu_x = gradient(mu, dx, axis=0)
+    mu_y = gradient(mu, dy, axis=1)
+    mu_z = gradient(mu, dz, axis=2)
+
+    E_xy_x = gradient(E[0,1,...], dx, axis=0)
+    E_xy_y = gradient(E[0,1,...], dy, axis=1)
+    E_xy_z = gradient(E[0,1,...], dz, axis=2)
+
+    E_xz_x = gradient(E[0,2,...], dx, axis=0)
+    E_xz_y = gradient(E[0,2,...], dy, axis=1)
+    E_xz_z = gradient(E[0,2,...], dz, axis=2)
+
+    E_yz_x = gradient(E[1,2,...], dx, axis=0)
+    E_yz_y = gradient(E[1,2,...], dy, axis=1)
+    E_yz_z = gradient(E[1,2,...], dz, axis=2)
+
+    div2_x = 2 * (mu_x * E[0,0,...] + mu * E_xx_x + mu_y * E[0,1,...] + mu * E_xy_y + mu_z * E[0,2,...] + mu * E_xz_z)
+    div2_y = 2 * (mu_x * E[1,0,...] + mu * E_xy_x + mu_y * E[1,1,...] + mu * E_yy_y + mu_z * E[1,2,...] + mu * E_yz_z)
+    div2_z = 2 * (mu_x * E[2,0,...] + mu * E_xz_x + mu_y * E[2,1,...] + mu * E_yz_y + mu_z * E[2,2,...] + mu * E_zz_z)
+
+    div2 = tf.stack([div2_x, div2_y, div2_z], axis=0)
+
+    div = div1 + div2
+    return div
 
 
 def divergence_fd(tensor, dx, dy, dz):
@@ -235,9 +294,9 @@ def plot_func(problem, state, epoch, frame, cbinfo=None):
 
 def invscar(**params):
     # Geometry
-    Nx_i = params.get('Nx_inv', 40)
-    Ny_i = params.get('Ny_inv', 40)
-    Nz_i = params.get('Nz_inv', 20)
+    Nx_i = params.get('Nx_inv', 20)
+    Ny_i = params.get('Ny_inv', 20)
+    Nz_i = params.get('Nz_inv', 10)
 
     Lx = params.get('Lx', 2.0)
     Ly = params.get('Ly', 2.0)
@@ -255,9 +314,9 @@ def invscar(**params):
     noise_level = params.get('noise_level', 1e-2)
     noise_seed = params.get('noise_seed', 123)
 
-    lam_pde = params.get("lam_pde", 1e1)
-    lam_bcn = params.get("lam_bcn", 1e0)
-    lam_dat = params.get("lam_dat", 1e2)
+    lam_pde = params.get("lam_pde", 1e2)
+    lam_bcn = params.get("lam_bcn", 0e1)
+    lam_dat = params.get("lam_dat", 1e0)
 
     J_regu = params.get('J_regu', 'H1')
     lam_reg = params.get('lam_reg', 1e-3)
@@ -265,7 +324,7 @@ def invscar(**params):
     # File handling
     tag = params.get('run_name', None)
     if tag is None:
-        tag = f"Ninv{Nx_i}x{Ny_i}x{Nz_i}_pload{float(p_load)}_noise{float(noise_level)}"
+        tag = f"Ninv{Nx_i}x{Ny_i}x{Nz_i}_noise{float(noise_level)}"
 
     # output root and run directory
     out_root = Path(params.get('out_root', 'runs_odil'))
@@ -285,12 +344,12 @@ def invscar(**params):
     params.optimizer2 = 'lbfgs'
     params.linsolver = 'direct'
     params.multigrid = True
-    params.lr = 0.001
-    params.epochs1 = 1000
-    params.epochs2 = 50001
+    params.lr = 0.01
+    params.epochs1 = 10000
+    params.epochs2 = 1000001
 
 
-    params.plot_every = 5000
+    params.plot_every = 10000
 
     def operator(ctx):
         extra = ctx.extra
@@ -308,6 +367,8 @@ def invscar(**params):
         uy = mod.where(iy == 0, ctx.cast(0.0), uy)
         uz = mod.where(iz == 0, ctx.cast(0.0), uz)
 
+        mu_r = ctx.field("mu_raw", 0, 0, 0)
+
         l = ctx.cast(lambda_)
         mu = param(mu_r)  # already grid-shaped
 
@@ -318,7 +379,8 @@ def invscar(**params):
         sigma= compute_stress(E, lambda_, mu)
 
         # ----------------- div σ -----------------
-        div = divergence_fd(sigma, dx, dy, dz)
+        #div = divergence_fd(sigma, dx, dy, dz)
+        div = compute_div_stress(E, lambda_, mu, dx, dy, dz)
 
         # ----------------- PDE residual -----------------
         vol = ctx.cast(dx * dy * dz)
@@ -347,7 +409,7 @@ def invscar(**params):
         mask_zp = (iz == nz - 1)
 
         p_vec = tf.reshape(tf.constant([0.0, 0.0, p_load], dtype=tf.float64), (1,3,1,1,1))
-        tf.print(sigma[:,:,3,3,3])
+
         res += [
             ("bc_z", kneum_z * mod.where(mask_zp, sigma[:,2,...] - p_vec, ctx.cast(0))),
             ("bc_y", kneum_y * mod.where(mask_yp, sigma[:,1,...], ctx.cast(0))),

@@ -32,7 +32,7 @@ if __name__ == '__main__':
         J_regu=['H1', 'TV'], #'L2', 'H1',
         lam_pde=[1e2, 1e3],
         lam_bcn=[1e0],
-        lam_dat=[1e3],
+        lam_dat=[1e1],
         lam_reg=[1e-3],
     )
 
