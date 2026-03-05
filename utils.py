@@ -1,10 +1,6 @@
-from pathlib import Path
 import itertools
-import csv
 import time
-import json
-import os
-import numpy as np
+
 
 def grid_product(grid_dict):
     """Expand a dict of lists into a list of param dicts."""
@@ -12,65 +8,44 @@ def grid_product(grid_dict):
     for vals in itertools.product(*(grid_dict[k] for k in keys)):
         yield dict(zip(keys, vals))
 
-def run_grid(invscar, out_root='runs', base_params=None, grid=None, run_name_fmt=None, append_global_summary=True):
-    """Run a hyperparameter grid and collect a master CSV and JSON index.
+
+def run_grid(invscar, base_params=None, grid=None, log_fn=None):
+    """Run a hyperparameter grid, optionally logging each result.
 
     Parameters
     ----------
-    out_root : str
-        Root output folder. Each run goes into out_root/<tag>.
+    invscar : callable
+        Solver function (**params) -> InvScarResult.
     base_params : dict or None
-        Parameters passed to every run (e.g., geometry, physics). Overridden by grid-specific values.
+        Parameters passed to every run.
     grid : dict
         Keys are parameter names, values are lists of values to sweep.
-        Example: {'J_regu':['L2','H1'], 'lmbda':[1e-8,1e-7], 'Nx_inv':[16,24]}
-    run_name_fmt : callable or str or None
-        If callable(params)->str, use to build the run tag.
-        If string, it will be formatted with params via .format(**params).
-        If None, invscar will auto-generate tag from meshes and p_load.
-    append_global_summary : bool
-        Whether each run should append a line to out_root/summary.csv (invscar handles it).
+    log_fn : callable or None
+        If provided, called with each InvScarResult for logging (e.g. log_result_to_mlflow).
     """
-    Path(out_root).mkdir(parents=True, exist_ok=True)
-
     base_params = dict(base_params or {})
     grid = grid or {}
 
-    # index file to collect per-run metadata beyond the CSV
-    index_json = Path(out_root) / 'index.json'
-    index = []
-    if index_json.exists():
-        try:
-            index = json.loads(index_json.read_text())
-        except Exception:
-            index = []
-
+    results = []
     for sweep_params in grid_product(grid):
-        # compose full params
-        params = dict(base_params)
-        params.update(sweep_params)
-        params['out_root'] = out_root
-        params['append_global_summary'] = append_global_summary
+        params = {**base_params, **sweep_params}
 
-        # optional deterministic noise per run
+        # Derive a deterministic noise seed if not set
         noise_seed = params.get('noise_seed', None)
         if noise_seed is None:
-            # derive a seed from key hyperparams for reproducibility
             seed = hash(tuple(sorted((k, str(v)) for k, v in sweep_params.items()))) % (2**32)
             params['noise_seed'] = seed
 
-        # craft run tag if requested
-        if run_name_fmt is not None:
-            if callable(run_name_fmt):
-                tag = run_name_fmt(params)
-            else:
-                tag = str(run_name_fmt).format(**{k: params.get(k) for k in params})
-            params['run_name'] = tag
-
         print("\n=== Running:", {k: params[k] for k in sorted(sweep_params.keys())})
         t0 = time.time()
-        res = invscar(**params)
+        result = invscar(**params)
         t1 = time.time()
+        print(f"    Completed in {t1 - t0:.1f}s")
 
-    print("\nAll runs complete. Global summary CSV at:", Path(out_root) / 'summary.csv')
-    print("JSON index at:", index_json)
+        if log_fn is not None:
+            log_fn(result)
+
+        results.append(result)
+
+    print(f"\nAll {len(results)} runs complete.")
+    return results

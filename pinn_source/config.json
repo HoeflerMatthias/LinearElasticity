@@ -1,0 +1,120 @@
+{
+  "inverse_params": {
+      "mu": {
+          "on": true,
+          "sigmoid_scalings": [1.0, 30.0],
+          "initial_factor": 1.5,
+          "min_factor": 0.5,
+          "max_factor": 2.0,
+          "threshold": 0.5,
+          "max_value": 10.0,
+          "net": {
+              "model_path": false,
+              "on": true,
+              "layers": [16, 16, 16],
+              "wT": 1e-1,
+              "wTV": 0.0,
+              "fourier": false,
+              "fourier_params": {
+                  "sig": 3.0,
+                  "output": 9
+              }
+          }
+      }
+  },
+
+  "net": {
+    "model_path": false,
+    "layers": [32, 32, 32],
+    "residual_connection": true,
+    "BL": true,
+    "BL_params": {
+      "axis": [0, 1, 2],
+      "value": [0.0, 0.0, 0.0],
+      "distance_axes": [[0], [1], [2]]
+    }
+  },
+
+  "data": "data/linear_symcube_p10.csv",
+
+  "model": {
+      "body_force": [0.0, 0.0, 0.0],
+      "lam": 650,
+      "pressure": 10.0,
+      "scaling": 1e-2,
+      "regions": {
+        "healthy": {
+          "tag": 1,
+          "mu": 8.0
+        },
+        "scar": {
+          "tag": 2,
+          "mu": 16.0
+        }
+      }
+  },
+
+  "numPDE": 8000,
+  "numBCN": 1000,
+  "numData": 1000,
+  "numTest": 1000,
+
+  "mesh_loss": false,
+
+  "bfgs_backend": "scipy",
+
+  "adam1": 200,
+  "bfgs1": 200,
+  "bfgs2": 200,
+  "adam3": 1000,
+  "bfgs3": 30000,
+  "lr1": 1e-2,
+  "lr2": 3e-4,
+
+  "phases": [true, false, true],
+
+  "wPDE": 1e2,
+  "wFit": 1e6,
+  "wBCN": 1e2,
+  "wT": 1e-7,
+  "wM": 0.0,
+  "wP": 0.0,
+
+  "seed": 0,
+
+  "batch_size": 1.0,
+
+  "adapt": true,
+  "adapt_alpha": 0.1,
+  "RBA": true,
+  "RBA_params": {
+    "losses": ["PDE"],
+    "eta": 0.4,
+    "gamma": 0.9,
+    "lambda0": 0.2,
+    "update_frequency": 10
+  },
+
+  "SNR": 0.1,
+
+  "program": {
+      "base_dir": "default",
+
+      "history_dir": "History",
+      "data_dir": "Data",
+      "model_dir": "Model",
+
+      "history_fit_dir": "History/Fit",
+      "data_fit_dir": "Data/Fit",
+
+      "history_physics_dir": "History/Physics",
+      "data_physics_dir": "Data/Physics",
+
+      "solution_dir": "Solution",
+      "solution_bc_dir": "Solution/BC",
+      "solution_fit_dir": "Solution/Fit",
+      "solution_sample_dir": "Solution/Sample",
+      "solution_weight_dir": "Solution/Weight",
+      "solution_field_dir": "Solution/Field"
+  }
+}

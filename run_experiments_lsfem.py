@@ -5,14 +5,14 @@ from concurrent.futures import ProcessPoolExecutor
 from utils import grid_product
 
 TRACKING_URI = os.environ.get("MLFLOW_TRACKING_URI", "http://localhost:8080")
-EXPERIMENT = "elasticity_reduced"
+EXPERIMENT = "elasticity_lsfem"
 MAX_WORKERS = int(os.environ.get("MAX_WORKERS", 4))
 
 
 def _run_one(params):
     """Worker: import Firedrake fresh in spawned process, solve, and log."""
     import mlflow
-    from reduced import invscar
+    from lsfem import invscar
     from fem_source import log_result_to_mlflow
 
     mlflow.set_tracking_uri(TRACKING_URI)

@@ -6,4 +6,5 @@ tf-keras
 meshio
 python-box
 pandas
-mlflow
+mlflow==3.9.0
+pyvista

@@ -1,44 +1,19 @@
+import time
+
 from firedrake import *
 import numpy as np
 from scipy.optimize import minimize
-import matplotlib.pyplot as plt
-import csv
-import os
-from pathlib import Path
-import json
-from types import SimpleNamespace
+
+from fem_source import (
+    L2_error, rel_L2_error, pointwise_rel_L2_error, InvScarResult,
+    create_box_mesh, create_spaces, symmetry_bcs,
+    make_forward_solver, regularization_functionals,
+    load_ground_truth, apply_noise,
+    save_solution_checkpoint,
+)
 
 __all__ = ["invscar"]
 
-def L2_error(a, a_ref, rel=True):
-    """
-    Compute relative L2 error between 'a' and 'a_ref',
-    interpolating 'a' onto the mesh of 'a_ref' if needed.
-    """
-    V_ref = a_ref.function_space()
-    mesh_ref = V_ref.mesh()
-
-    mesh_a = a.function_space().mesh()
-
-    if mesh_a is not mesh_ref:
-        a_fine = Function(V_ref)
-        a_fine.interpolate(a)  # evaluate a on the fine mesh
-    else:
-        a_fine = a
-
-    # --- 2. Assemble L2 norms on the reference (fine) mesh ---
-    if rel:
-        err = assemble(dot(a_fine - a_ref, a_fine - a_ref) / (dot(a_ref, a_ref) + 1e-12) * dx(domain=mesh_ref))
-    else:
-        err = assemble(dot(a_fine - a_ref, a_fine - a_ref) * dx(domain=mesh_ref))
-
-    return float(np.sqrt(err))
-
-def fmt(p):
-    return (f"reg{p['J_regu']}_lam{float(p['lam_reg'])}_"
-            f"Ninv{p['Nx_inv']}x{p['Ny_inv']}x{p['Nz_inv']}_"
-            f"noise{p['noise_level']}"
-    )
 
 def invscar(**params):
 
@@ -46,10 +21,6 @@ def invscar(**params):
     Nx_i = params.get('Nx_inv', 10)
     Ny_i = params.get('Ny_inv', 10)
     Nz_i = params.get('Nz_inv', 5)
-
-    Lx = params.get('Lx', 2.0)
-    Ly = params.get('Ly', 2.0)
-    Lz = params.get('Lz', 1.0)
 
     # Physics parameters
     lambda_ = Constant(params.get('lambda_', 650.0))
@@ -68,110 +39,49 @@ def invscar(**params):
 
     data_csv = params.get("data_csv", "linear_symcube_p10.h5")
 
-    # File handling
-    tag = fmt({
-        'J_regu': J_regu,
-        'lam_reg': lam_reg,
-        'Nx_inv': Nx_i,
-        'Ny_inv': Ny_i,
-        'Nz_inv': Nz_i,
-        'noise_level': noise_level
-    })
-
-    # output root and run directory
-    out_root = Path(params.get('out_root', 'runs_red'))
-    run_dir = out_root / tag
-    run_dir.mkdir(parents=True, exist_ok=True)
-
-    # Geometry
-    mm_inv = BoxMesh(Nx_i, Ny_i, Nz_i, Lx, Ly, Lz, hexahedral=False)
-
-    dim = mm_inv.geometric_dimension()
-
-    x_i = SpatialCoordinate(mm_inv)
-
-    # Spaces
-    V_i = VectorFunctionSpace(mm_inv, "P", 1)  # u
-    Q_i = FunctionSpace(mm_inv, "P", 1)  # alpha
-
-    # Boundary conditions
-    bcs = [
-        DirichletBC(V_i.sub(0), Constant(0.0), 1),
-        DirichletBC(V_i.sub(1), Constant(0.0), 3),
-        DirichletBC(V_i.sub(2), Constant(0.0), 5),
-    ]
+    # Mesh and spaces
+    mm_inv = create_box_mesh(Nx_i, Ny_i, Nz_i)
+    V_i, Q_i = create_spaces(mm_inv)
+    bcs = symmetry_bcs(V_i)
 
     # Functions
     ud = Function(V_i, name="displ_data")
-
     u_i = Function(V_i, name="displacement")
     p_i = Function(V_i, name="adjoint")
     alpha_i = Function(Q_i, name="alpha")
-
     v_i = TestFunction(V_i)
 
-    # --- load forward/ground-truth data from CSV ---
-    with CheckpointFile(data_csv, "r") as chk:
-        mm_true = chk.load_mesh()
-        alpha_t = chk.load_function(mm_true, name="alpha_true")
-        u_t = chk.load_function(mm_true, name="u_true")
-
+    # Load ground truth and apply noise
+    mm_true, alpha_t, u_t = load_ground_truth(data_csv)
     ud.interpolate(u_t)
-
-    sigma_u = np.max(np.abs(ud.dat.data_ro), axis=0) / 3
-
-    rng = np.random.default_rng(noise_seed)
-    ud.dat.data[:] += noise_level * sigma_u * rng.normal(size=ud.dat.data.shape)
-
-    for bc in bcs:
-        bc.apply(ud)
+    apply_noise(ud, bcs, noise_level, noise_seed)
 
     u_i.interpolate(ud)
     alpha_i.interpolate(Constant(1.5))
 
-    # -----------------------------
-    # Inversion problem on inversion mesh
-    # -----------------------------
-
-    eps = sym(grad(u_i))
-    W = (lambda_/2)*tr(eps)**2 * dx \
-      + alpha_i*mu*inner(eps, eps)*dx \
-      - dot(p_load*Constant((0.0, 0.0, 1.0)), u_i)*ds(6)
-
-    G = derivative(W, u_i)
-    fwd_prob   = NonlinearVariationalProblem(G, u_i, bcs, form_compiler_parameters={'quadrature_degree': 2})
-    fwd_solver = NonlinearVariationalSolver(fwd_prob)
+    # Forward solver
+    fwd_solver, W, G = make_forward_solver(u_i, alpha_i, bcs, lambda_, mu, p_load)
 
     # Objective and regularization
-    R_L2 = lambda g: 0.5*g**2*dx
-    R_H1 = lambda g: 0.5*inner(grad(g), grad(g))*dx
-    R_TV = lambda g: sqrt(1e-2 + inner(grad(g), grad(g)))*dx
+    J_R = regularization_functionals()[J_regu]
 
-    J_ful = lambda d: 0.5*dot(d, d)*dx
-    J_bcs = lambda d: 0.5*dot(d, d)*ds
+    J_ful = lambda d: 0.5 * dot(d, d) * dx
 
-    J_fide = params.get('J_fide', 'full')
-    J_regu = params.get('J_regu', 'H1')
-
-    J_R = {'L2': R_L2, 'H1': R_H1, 'TV': R_TV}[J_regu]
-
-    J  = J_ful(u_i - ud) + lam_reg * J_R(alpha_i)
+    J = J_ful(u_i - ud) + lam_reg * J_R(alpha_i)
     dJ = lam_reg * derivative(J_R(alpha_i), alpha_i) + derivative(action(G, p_i), alpha_i)
 
     # Adjoint
     dG = adjoint(derivative(G, u_i))
-    La = -dot(u_i - ud, v_i) * ({'full': dx, 'bcs': ds}[J_fide])
-    adj_prob   = LinearVariationalProblem(dG, La, p_i, bcs)
+    La = -dot(u_i - ud, v_i) * dx
+    adj_prob = LinearVariationalProblem(dG, La, p_i, bcs)
     adj_solver = LinearVariationalSolver(adj_prob)
 
     # Histories
-    err_alpha_L2_hist  = []
-    err_u_L2_hist      = []
-    J_hist             = []
+    J_fid_hist, J_reg_hist = [], []
+    err_u_abs_hist, err_u_rel_hist = [], []
+    err_alpha_pwrel_hist = []
 
-    # -----------------------------
     # Optimization
-    # -----------------------------
     x0 = alpha_i.dat.data_ro.copy()
 
     lb = np.full_like(x0, lower_bnd)
@@ -189,101 +99,74 @@ def invscar(**params):
         adj_solver.solve()
         return assemble(dJ).dat.data_ro
 
-    # Output handling
-    ofile_name = str((run_dir / f"out.pvd").as_posix())
-
-    ofile = VTKFile(ofile_name)
+    J_fid_form = J_ful(u_i - ud)
+    J_reg_form = J_R(alpha_i)
 
     state = {"k": -1}
-    def _record_errors_and_write():
+    def _record_errors():
         state["k"] += 1
-        # ensure forward is consistent
         if state["k"] % 50 == 0:
             fwd_solver.solve()
-            J_hist.append(assemble(J))
-            err_alpha_L2_hist.append(L2_error(alpha_i, alpha_t))
-            err_u_L2_hist.append(L2_error(u_i, u_t, rel=False))
-            ofile.write(u_i, alpha_i, time=state["k"])
+            J_fid_hist.append(float(assemble(J_fid_form)))
+            J_reg_hist.append(float(assemble(J_reg_form)))
+            err_u_abs_hist.append(L2_error(u_i, u_t))
+            err_u_rel_hist.append(rel_L2_error(u_i, u_t))
+            err_alpha_pwrel_hist.append(pointwise_rel_L2_error(alpha_i, alpha_t))
 
-    # initial metrics
-    _record_errors_and_write()
+    _record_errors()
 
     bfgs_disp = params.get('bfgs_disp', False)
+    t0 = time.perf_counter()
     res = minimize(Jfun, x0, jac=dJfun, tol=1e-10, bounds=bnds,
                    method='L-BFGS-B',
-                   callback=lambda xk: _record_errors_and_write(),
+                   callback=lambda xk: _record_errors(),
                    options={'disp': bfgs_disp})
+    wall_time = time.perf_counter() - t0
 
-    # -----------------------------
-    # Final metrics and splits
-    # -----------------------------
-    final_alpha_L2 = L2_error(alpha_i, alpha_t)
-    final_u_L2 = L2_error(u_i, u_t)
+    # Final metrics
+    final_u_abs = L2_error(u_i, u_t)
+    final_u_rel = rel_L2_error(u_i, u_t)
+    final_alpha_pwrel = pointwise_rel_L2_error(alpha_i, alpha_t)
 
-    J_fid = float(assemble(J_ful(u_i - ud)))
-    J_reg = float(assemble(J_R(alpha_i)))
+    J_fid = float(assemble(J_fid_form))
+    J_reg = float(assemble(J_reg_form))
 
-    # -----------------------------
-    # CSV export (same format as kkt.py)
-    # -----------------------------
-    with open((run_dir / f"reconstruction_metrics_{tag}.csv").as_posix(), "w", newline="") as f:
-        w = csv.writer(f)
-        w.writerow(["iter", "J", "rel_L2(alpha)", "L2(u)"])
-        for k in range(len(J_hist)):
-            w.writerow([k, J_hist[k], err_alpha_L2_hist[k], err_u_L2_hist[k]])
+    # Build used_params dict (all effective values including defaults)
+    used_params = {
+        'Nx_inv': Nx_i, 'Ny_inv': Ny_i, 'Nz_inv': Nz_i,
+        'lambda_': float(lambda_), 'mu': float(mu), 'p_load': float(p_load) * -1,
+        'noise_level': noise_level, 'noise_seed': noise_seed,
+        'J_regu': J_regu, 'lam_reg': float(lam_reg),
+        'lower_bnd': lower_bnd, 'upper_bnd': upper_bnd,
+        'data_csv': data_csv,
+        'solver': 'reduced',
+    }
 
-    # -----------------------------
-    # Package result (same fields as kkt.py)
-    # -----------------------------
-    class InvScarResult:
-        pass
+    metrics = {
+        'J_fid_hist': J_fid_hist,
+        'J_reg_hist': J_reg_hist,
+        'err_u_abs_hist': err_u_abs_hist,
+        'err_u_rel_hist': err_u_rel_hist,
+        'err_alpha_pwrel_hist': err_alpha_pwrel_hist,
+        'J_fid_final': J_fid,
+        'J_reg_final': J_reg,
+        'err_u_abs_final': float(final_u_abs),
+        'err_u_rel_final': float(final_u_rel),
+        'err_alpha_pwrel_final': float(final_alpha_pwrel),
+        'nit': getattr(res, 'nit', None),
+        'nfev': getattr(res, 'nfev', None),
+        'njev': getattr(res, 'njev', None),
+        'wall_time': wall_time,
+    }
 
-    result = InvScarResult()
-    result.u = u_i
-    result.alpha = alpha_i
-    result.res = res
-    result.u_true = u_t
-    result.alpha_true = alpha_t
-    result.J_fid = J_fid
-    result.J_reg = J_reg
+    solution_file = save_solution_checkpoint(u_i, alpha_i, u_true=u_t, alpha_true=alpha_t)
 
-    result.err_alpha_L2_hist = err_alpha_L2_hist
-    result.err_u_L2_hist = err_u_L2_hist
-    result.J_hist = J_hist
-    result.err_alpha_L2_final = final_alpha_L2
-    result.err_u_L2_final = final_u_L2
-
-    result.tag = tag
-    result.run_dir = str(run_dir)
-
-    # --- optionally append to global summary CSV ---
-    if params.get('append_global_summary', True):
-        summary_path = out_root / 'summary.csv'
-        header = [
-            'tag', 'run_dir', 'Nx_inv', 'Ny_inv', 'Nz_inv',
-            'J_regu', 'lmbda', 'noise_level',
-            'J_fid', 'J_reg',
-            'rel_L2_alpha_final', 'L2_u_final',
-            'nit', 'nfev', 'njev', 'success'
-        ]
-        row = [
-            tag, str(run_dir), Nx_i, Ny_i, Nz_i,
-            J_regu, float(lam_reg), noise_level,
-            float(J_fid), float(J_reg),
-            float(final_alpha_L2), float(final_u_L2),
-            getattr(res, 'nit', None), getattr(res, 'nfev', None), getattr(res, 'njev', None),
-            getattr(res, 'success', None)
-        ]
-        write_header = not summary_path.exists()
-        with open(summary_path, 'a', newline='') as f:
-            w = csv.writer(f)
-            if write_header:
-                w.writerow(header)
-            w.writerow(row)
-
-    return result
+    return InvScarResult(
+        params=used_params,
+        metrics=metrics,
+        solution_file=solution_file,
+    )
 
 
 if __name__ == "__main__":
-    # quick test run
     invscar()

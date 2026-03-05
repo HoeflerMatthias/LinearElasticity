@@ -59,20 +59,20 @@ def gradient(tensor, step, axis, final_op=False):
         # Forward difference at the top boundary and backward difference at the bottom boundary
         #gradient_top = (tensor[:, 1, :] - tensor[:, 0, :]) / step
         #gradient_bottom = (tensor[:, -1, :] - tensor[:, -2, :]) / step
-        gradient_top = grad_left(tensor[:, 0, :], tensor[:, 1, :], tensor[:, 2, :], step)
-        gradient_bottom = grad_right(tensor[:, -1, :], tensor[:, -2, :], tensor[:, -3, :], step)
+        gradient_bottom = grad_left(tensor[:, 0, :], tensor[:, 1, :], tensor[:, 2, :], step)
+        gradient_top = grad_right(tensor[:, -1, :], tensor[:, -2, :], tensor[:, -3, :], step)
 
-        gradient = tf.concat([gradient_top[:, None, :], gradient[:, 1:-1, :], gradient_bottom[:, None, :]],
+        gradient = tf.concat([gradient_bottom[:, None, :], gradient[:, 1:-1, :], gradient_top[:, None, :]],
                              axis=axis)
 
     elif axis == 2:
         # Forward difference at the front boundary and backward difference at the back boundary
         #gradient_front = (tensor[:, :, 1] - tensor[:, :, 0]) / step
         #gradient_back = (tensor[:, :, -1] - tensor[:, :, -2]) / step
-        gradient_front = grad_left(tensor[:, :, 0], tensor[:, :, 1], tensor[:, :, 2], step)
-        gradient_back = grad_right(tensor[:, :, -1], tensor[:, :, -2], tensor[:, :, -3], step)
+        gradient_back = grad_left(tensor[:, :, 0], tensor[:, :, 1], tensor[:, :, 2], step)
+        gradient_front = grad_right(tensor[:, :, -1], tensor[:, :, -2], tensor[:, :, -3], step)
 
-        gradient = tf.concat([gradient_front[:, :, None], gradient[:, :, 1:-1], gradient_back[:, :, None]],
+        gradient = tf.concat([gradient_back[:, :, None], gradient[:, :, 1:-1], gradient_front[:, :, None]],
                              axis=axis)
 
     return gradient
@@ -294,9 +294,9 @@ def plot_func(problem, state, epoch, frame, cbinfo=None):
 
 def invscar(**params):
     # Geometry
-    Nx_i = params.get('Nx_inv', 20)
-    Ny_i = params.get('Ny_inv', 20)
-    Nz_i = params.get('Nz_inv', 10)
+    Nx_i = params.get('Nx_inv', 21)
+    Ny_i = params.get('Ny_inv', 21)
+    Nz_i = params.get('Nz_inv', 11)
 
     Lx = params.get('Lx', 2.0)
     Ly = params.get('Ly', 2.0)
@@ -315,10 +315,10 @@ def invscar(**params):
     noise_seed = params.get('noise_seed', 123)
 
     lam_pde = params.get("lam_pde", 1e2)
-    lam_bcn = params.get("lam_bcn", 0e1)
-    lam_dat = params.get("lam_dat", 1e0)
+    lam_bcn = params.get("lam_bcn", 1e1)
+    lam_dat = params.get("lam_dat", 0e0)
 
-    J_regu = params.get('J_regu', 'H1')
+    J_regu = params.get('J_regu', 'TV')
     lam_reg = params.get('lam_reg', 1e-3)
 
     # File handling
@@ -345,11 +345,11 @@ def invscar(**params):
     params.linsolver = 'direct'
     params.multigrid = True
     params.lr = 0.01
-    params.epochs1 = 10000
+    params.epochs1 = 1000
     params.epochs2 = 1000001
 
 
-    params.plot_every = 10000
+    params.plot_every = 5000
 
     def operator(ctx):
         extra = ctx.extra
@@ -371,7 +371,8 @@ def invscar(**params):
 
         l = ctx.cast(lambda_)
         mu = param(mu_r)  # already grid-shaped
-
+        mask = ix < iy
+        mu = mod.where(mask, ctx.cast(8.0), ctx.cast(16.0))
         # ----------------- strain -----------------
         E = compute_strain_tensor_lagrangian_full(ux, uy, uz, ctx)
 
@@ -413,7 +414,7 @@ def invscar(**params):
         res += [
             ("bc_z", kneum_z * mod.where(mask_zp, sigma[:,2,...] - p_vec, ctx.cast(0))),
             ("bc_y", kneum_y * mod.where(mask_yp, sigma[:,1,...], ctx.cast(0))),
-            ("bc_x", kneum_x * mod.where(mask_xp, sigma[:,0, ...], ctx.cast(0))),
+            ("bc_x", kneum_x * mod.where(mask_xp, sigma[:,0, ...], ctx.cast(0)))
         ]
 
         # ----------------- data misfit -----------------
@@ -421,7 +422,7 @@ def invscar(**params):
         u = tf.stack([ux, uy, uz], axis=-1)
         res += [
             ("data_u", ctx.cast(lam_dat) * (u - mod.constant(extra.data_u))),
-           # ("e_u", ctx.cast(1e-2) * (E[0,0,...]+E[1,1,...]+E[2,2,...]))
+            ("r_u", ctx.cast(1e-2) * u)
         ]
 
 

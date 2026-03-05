@@ -1,2 +1,3 @@
 numpy
 matplotlib
+mlflow==3.9.0
