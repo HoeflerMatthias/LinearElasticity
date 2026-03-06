@@ -67,10 +67,6 @@ class FEMDataHandler:
             self.x_displaced_orig = [(data[:,:3]+data[:,3:6], range(self.x_mesh.shape[0]), 0)]
             self.tag_values = np.expand_dims(data[:,6],-1)
 
-            self.tag_data = 1 + (self.x_mesh[:,0] < self.x_mesh[:,1])
-            self.tag_dict = {1: 8.0, 2: 16.0}
-            self.name_dict = {1: "healthy", 2: "scar"}
-
         self.x_displaced_indices = [(np.arange(0, self.x_mesh.shape[0]), 0)]
         self.x_displaced = copy.deepcopy(self.x_displaced_orig)
 
@@ -90,6 +86,19 @@ class FEMDataHandler:
         self.slice('nzplus', 2, self.max_dim[2])
 
         self.submeshes_reference_conf['low_resolution'] = np.arange(0, self.x_mesh.shape[0], step=4)
+
+    def set_regions(self):
+        """Auto-detect piecewise-constant regions from tag_values."""
+        vals = self.tag_values.flatten()
+        unique_vals = np.unique(np.round(vals, decimals=6))
+
+        # Assign each point to nearest unique value
+        distances = np.abs(vals[:, None] - unique_vals[None, :])
+        nearest = np.argmin(distances, axis=1)
+
+        self.tag_data = nearest + 1  # 1-based tags
+        self.tag_dict = {i + 1: float(v) for i, v in enumerate(unique_vals)}
+        self.name_dict = {i + 1: f"region_{i + 1}" for i in range(len(unique_vals))}
 
 #############################################################################
 # Getter

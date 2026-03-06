@@ -42,8 +42,6 @@ def run(args):
     random.seed(params['seed'])
     tf.keras.utils.set_random_seed(params['seed'])
     
-    params['model']['regions']['healthy']['mu'] *= params['model']['scaling']
-    params['model']['regions']['scar']['mu'] *= params['model']['scaling']
     params['model']['lam'] *= params['model']['scaling']
     params['model']['pressure'] *= params['model']['scaling']
 
@@ -130,6 +128,13 @@ def run(args):
     u_max = np.max(u_max_components)
 
     data_handler.tag_values *= params['model']['scaling']
+    data_handler.set_regions()
+
+    # Region mu values (sorted ascending) from auto-detected regions
+    region_mu_values = sorted(data_handler.tag_dict.values())
+    num_regions = len(region_mu_values)
+    region_mu_min = region_mu_values[0]
+    region_mu_max = region_mu_values[-1]
 
     # Network definition
     #####################
@@ -184,11 +189,11 @@ def run(args):
             model_param.summary()
             param_models[inverse_param] = model_param
 
-        # model parameter as scalar
+        # model parameter as scalar (two-region case)
         else:
-            left = tf.Variable(inv_param_func[inverse_param](params['model']['regions']['healthy']['mu'] * config['initial_factor']),dtype=ns.config.get_dtype(), name="healthy")
-            right = tf.Variable(inv_param_func[inverse_param](params['model']['regions']['scar']['mu'] * config['initial_factor']),dtype=ns.config.get_dtype(), name="scar")
-            
+            left = tf.Variable(inv_param_func[inverse_param](region_mu_min * config['initial_factor']),dtype=ns.config.get_dtype(), name="region_1")
+            right = tf.Variable(inv_param_func[inverse_param](region_mu_max * config['initial_factor']),dtype=ns.config.get_dtype(), name="region_2")
+
             model_param = lambda x: tf.expand_dims(tf.where(x[:,0] < x[:,1], left, right),-1)
             param_models[inverse_param] = model_param
     
@@ -241,13 +246,13 @@ def run(args):
             param_lambda = lambda x: param_func[inverse_param](param_models[inverse_param](x))
 
             # dice test loss
-            if config['net']['on'] and len(params['model']['regions'].keys()) > 1:
+            if config['net']['on'] and num_regions > 1:
                 threshold = params['inverse_params'][inverse_param]['threshold'] * \
                             params['inverse_params'][inverse_param]['max_value']
                 loss_handler.setup_dice_loss(param_lambda, dataset, threshold, identifier=inverse_param + '_dice')
 
             # region wise error losses
-            if config['net']['on'] and len(params['model']['regions'].keys()) > 1:
+            if config['net']['on'] and num_regions > 1:
                 loss_handler.setup_relative_region_error_losses(param_lambda, dataset,
                                                                 identifier=inverse_param + '_error')
 
@@ -255,30 +260,30 @@ def run(args):
             if config['net']['on']:
                 loss_handler.setup_relative_error_loss(param_lambda, dataset, identifier=inverse_param + '_error')
 
-            # if parameter is only scalar
+            # if parameter is only scalar (two-region test losses)
             if not config['net']['on']:
-                # relative error w.r.t. healthy region
-                loss_handler.add_loss(ns.Loss(inverse_param+"_healthy", lambda: tf.math.abs(param_func[inverse_param](
-                    param_models[inverse_param](tf.constant([[0.0,1.0,0.0]], dtype=ns.config.get_dtype()))) - params['model']['regions']['healthy'][inverse_param]) /
-                                                                     params['model']['regions']['healthy'][
-                                                                         inverse_param]), 'main', 'test')
-                # relative error w.r.t. scar region
-                loss_handler.add_loss(ns.Loss(inverse_param+"_scar", lambda: tf.math.abs(param_func[inverse_param](
-                    param_models[inverse_param](tf.constant([[1.0,0.0,0.0]], dtype=ns.config.get_dtype()))) - params['model']['regions']['scar'][inverse_param]) /
-                                                                     params['model']['regions']['scar'][
-                                                                         inverse_param]), 'main', 'test')
+                mu_min = tf.constant(region_mu_min, dtype=ns.config.get_dtype())
+                mu_max = tf.constant(region_mu_max, dtype=ns.config.get_dtype())
+                # relative error w.r.t. region 1 (x < y)
+                loss_handler.add_loss(ns.Loss(inverse_param+"_region_1", lambda: tf.math.abs(param_func[inverse_param](
+                    param_models[inverse_param](tf.constant([[0.0,1.0,0.0]], dtype=ns.config.get_dtype()))) - mu_min) /
+                                                                     mu_min), 'main', 'test')
+                # relative error w.r.t. region 2 (x >= y)
+                loss_handler.add_loss(ns.Loss(inverse_param+"_region_2", lambda: tf.math.abs(param_func[inverse_param](
+                    param_models[inverse_param](tf.constant([[1.0,0.0,0.0]], dtype=ns.config.get_dtype()))) - mu_max) /
+                                                                     mu_max), 'main', 'test')
 
             # box constraints
-            guess = params['model']['regions']['healthy'][inverse_param]
-            lower_bound = guess * config['min_factor']
-            upper_bound = guess * config['max_factor']
+            lower_bound = region_mu_min * config['min_factor']
+            upper_bound = region_mu_max * config['max_factor']
 
             loss_handler.setup_box_constraints(param_lambda, dataset, params['wM'], identifier=inverse_param,
                                                lower_bound=lower_bound, upper_bound=upper_bound)
 
             if params['wP'] > 0.:
-                weight_Prior = (params['wP'] / ((32.0 * params['model']['scaling']) ** 2))
-                prior_guess = params['model']['scaling'] * (16.0+8.0)/2.0
+                prior_scale = 2.0 * region_mu_max
+                weight_Prior = params['wP'] / (prior_scale ** 2)
+                prior_guess = sum(region_mu_values) / num_regions
                 loss_handler.setup_prior_loss(param_lambda, weight_Prior, identifier=inverse_param + '_prior',
                                               prior_guess=prior_guess)
 

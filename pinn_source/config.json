@@ -41,17 +41,7 @@
       "body_force": [0.0, 0.0, 0.0],
       "lam": 650,
       "pressure": 10.0,
-      "scaling": 1e-2,
-      "regions": {
-        "healthy": {
-          "tag": 1,
-          "mu": 8.0
-        },
-        "scar": {
-          "tag": 2,
-          "mu": 16.0
-        }
-      }
+      "scaling": 1e-2
   },
 
   "numPDE": 8000,
