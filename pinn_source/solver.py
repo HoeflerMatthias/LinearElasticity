@@ -260,18 +260,10 @@ def run(args):
             if config['net']['on']:
                 loss_handler.setup_relative_error_loss(param_lambda, dataset, identifier=inverse_param + '_error')
 
-            # if parameter is only scalar (two-region test losses)
-            if not config['net']['on']:
-                mu_min = tf.constant(region_mu_min, dtype=ns.config.get_dtype())
-                mu_max = tf.constant(region_mu_max, dtype=ns.config.get_dtype())
-                # relative error w.r.t. region 1 (x < y)
-                loss_handler.add_loss(ns.Loss(inverse_param+"_region_1", lambda: tf.math.abs(param_func[inverse_param](
-                    param_models[inverse_param](tf.constant([[0.0,1.0,0.0]], dtype=ns.config.get_dtype()))) - mu_min) /
-                                                                     mu_min), 'main', 'test')
-                # relative error w.r.t. region 2 (x >= y)
-                loss_handler.add_loss(ns.Loss(inverse_param+"_region_2", lambda: tf.math.abs(param_func[inverse_param](
-                    param_models[inverse_param](tf.constant([[1.0,0.0,0.0]], dtype=ns.config.get_dtype()))) - mu_max) /
-                                                                     mu_max), 'main', 'test')
+            # per-region relative error (scalar or network)
+            if not config['net']['on'] and num_regions > 1:
+                loss_handler.setup_relative_region_error_losses(param_lambda, dataset,
+                                                                identifier=inverse_param + '_error')
 
             # box constraints
             lower_bound = region_mu_min * config['min_factor']
