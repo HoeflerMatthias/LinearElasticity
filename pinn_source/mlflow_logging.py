@@ -18,7 +18,7 @@ def _flatten_params(d, prefix=""):
 
 
 def log_pinns_to_mlflow(params, filename, loss_handler, train_handler,
-                        artifact_dirs=None):
+                        artifact_dirs=None, timings=None):
     """Log a completed PINNs run to MLflow.
 
     Parameters
@@ -34,6 +34,8 @@ def log_pinns_to_mlflow(params, filename, loss_handler, train_handler,
     artifact_dirs : list[str] or None
         Additional directories whose contents are logged as artifacts
         (e.g. solution plots, field plots, saved models).
+    timings : dict[str, float] or None
+        Per-phase wall times in seconds (keys: 'fit', 'physics', 'main').
     """
     import mlflow
 
@@ -53,6 +55,14 @@ def log_pinns_to_mlflow(params, filename, loss_handler, train_handler,
                 mlflow.log_metric(f"test/{loss.name}", val)
             except Exception as e:
                 print(f"[mlflow] skipping metric test/{loss.name}: {e}")
+
+        # -- Timings ----------------------------------------------------- #
+        if timings:
+            total = 0.0
+            for phase, secs in timings.items():
+                mlflow.log_metric(f"time/{phase}_s", secs)
+                total += secs
+            mlflow.log_metric("time/total_s", total)
 
         # -- Artifacts: history JSON and plot files ---------------------- #
         for phase, paths in train_handler.filenames.items():

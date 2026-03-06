@@ -347,10 +347,6 @@ def run(args):
     else:
         param_lambda = None
 
-    def plot_save_callback(pb, itr, itr_round, frequency=1000):
-        if itr % frequency == 0 and itr > 0:
-            save_plots(data_handler, model, param_lambda, filename, params, plot_solution=True)
-
     # add weight histories and parameters to json output of optimization problem
     def train_preparation_callback(pb: ns.OptimizationProblem):
         train_handler.add_parameters(pb, params)
@@ -379,12 +375,19 @@ def run(args):
     
     bfgs_backend = params.get('bfgs_backend', 'scipy')
 
+    import time as _time
+
+    timings = {}
+
     print('start training')
     # Step 1: only fitting
     ####################
     if params['phases'][0]:
+        t0 = _time.perf_counter()
 
         train_handler.train_fit(params['lr1'], params['adam1'], params['bfgs1'], bfgs_backend=bfgs_backend)
+
+        timings['fit'] = _time.perf_counter() - t0
 
         data_plotter.animate_error_plot(data_handler, lambda x: model(x[:, :dim]),
                                         filename=params['program']['base_dir'] + '/' + params['program'][
@@ -397,7 +400,11 @@ def run(args):
     # Step 2: only physics
     ####################
     if params['phases'][1] and has_inverse_problem:
+        t0 = _time.perf_counter()
+
         train_handler.train_physics(params['lr1'], params['adam1'], params['bfgs2'], data=collocation_points, bfgs_backend=bfgs_backend)
+
+        timings['physics'] = _time.perf_counter() - t0
 
         physics_plot = params['program']['base_dir'] + '/' + params['program']['solution_fit_dir'] + '/P' + filename + '.png'
         save_plots(data_handler, model, param_lambda, physics_plot, params, plot_solution=True)
@@ -420,12 +427,11 @@ def run(args):
                 train_handler.weight_adjustment_callback(alpha=params['adapt_alpha'], frequency=10)
             ]
 
-        train_handler.callbacks += [
-            train_handler.model_save_callback(model_list, filename_list, frequency=200),
-            lambda pb, itr, itr_round: plot_save_callback(pb, itr, itr_round, frequency=200)
-        ]
+        t0 = _time.perf_counter()
 
         train_handler.train_main(params['lr2'], params['adam3'], params['bfgs3'], data=collocation_points, bfgs_backend=bfgs_backend)
+
+        timings['main'] = _time.perf_counter() - t0
 
     #############################################################################
     # Post-processing
@@ -486,4 +492,4 @@ def run(args):
         ]
 
         log_pinns_to_mlflow(params, filename, loss_handler, train_handler,
-                            artifact_dirs=artifact_dirs)
+                            artifact_dirs=artifact_dirs, timings=timings)

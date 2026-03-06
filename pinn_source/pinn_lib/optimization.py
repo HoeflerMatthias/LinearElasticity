@@ -145,7 +145,7 @@ class OptimizationProblem:
 # Public API
 # --------------------------------------------------------------------------- #
 
-def minimize(pb, method, optimizer_or_name, num_epochs=1000):
+def minimize(pb, method, optimizer_or_name, num_epochs=1000, verbose=True):
     """Run *num_epochs* optimisation steps.
 
     Parameters
@@ -154,7 +154,10 @@ def minimize(pb, method, optimizer_or_name, num_epochs=1000):
     method : ``'keras'`` | ``'scipy'`` | ``'tfp'``
     optimizer_or_name : tf.keras.optimizers.Optimizer or ``'BFGS'``
     num_epochs : int
+    verbose : bool
+        Print progress every 100 steps.
     """
+    pb._verbose = verbose
     if method == 'keras':
         _minimize_keras(pb, optimizer_or_name, num_epochs)
     elif method == 'scipy':
@@ -191,18 +194,18 @@ def _minimize_keras(pb, optimizer, num_epochs):
         ]
         optimizer.apply_gradients(grads_and_vars)
 
-        # Log train losses
-        for loss in pb.train_losses:
-            pb.history['losses'][loss.name]['log'].append(
-                float(loss_values[loss.name].numpy())
-            )
+        # Log train losses (every 100 steps to avoid GPU sync stalls)
+        if epoch % 100 == 0:
+            for loss in pb.train_losses:
+                pb.history['losses'][loss.name]['log'].append(
+                    float(loss_values[loss.name].numpy())
+                )
+            if pb._verbose:
+                print(f"  Adam  {epoch:>6d}/{num_epochs}  loss={total_loss.numpy():.6e}")
 
         # Callbacks
         for cb in pb.callbacks:
             cb(pb, epoch, epoch)
-
-        if epoch % 100 == 0:
-            print(f"  Adam  {epoch:>6d}/{num_epochs}  loss={total_loss.numpy():.6e}")
 
 
 # --------------------------------------------------------------------------- #
@@ -234,20 +237,19 @@ def _minimize_scipy(pb, method_name, num_epochs):
         stitcher.set_values(xk)
         itr[0] += 1
 
-        # Log train losses
-        for loss in pb.train_losses:
-            val = loss(data)
-            pb.history['losses'][loss.name]['log'].append(float(val.numpy()))
-
         # Callbacks
         for cb in pb.callbacks:
             cb(pb, itr[0], itr[0])
 
+        # Log train losses (every 100 steps to reduce overhead)
         if itr[0] % 100 == 0:
-            total = sum(
-                float(loss(data).numpy()) for loss in pb.train_losses
-            )
-            print(f"  BFGS  {itr[0]:>6d}/{num_epochs}  loss={total:.6e}")
+            total = 0.0
+            for loss in pb.train_losses:
+                val = float(loss(data).numpy())
+                pb.history['losses'][loss.name]['log'].append(val)
+                total += val
+            if pb._verbose:
+                print(f"  BFGS  {itr[0]:>6d}/{num_epochs}  loss={total:.6e}")
 
     x0 = stitcher.get_values().astype(np.float64)
 
@@ -266,7 +268,8 @@ def _minimize_scipy(pb, method_name, num_epochs):
     )
 
     stitcher.set_values(result.x)
-    print(f"  BFGS  done  ({result.message.decode() if isinstance(result.message, bytes) else result.message})")
+    if pb._verbose:
+        print(f"  BFGS  done  ({result.message.decode() if isinstance(result.message, bytes) else result.message})")
 
 
 # --------------------------------------------------------------------------- #
@@ -312,7 +315,8 @@ def _minimize_tfp_lbfgs(pb, num_epochs):
 
     x0 = stitcher.get_values_tf()
 
-    print(f"  TFP-BFGS  starting  ({num_epochs} max iterations, {stitcher.total_size} variables)")
+    if pb._verbose:
+        print(f"  TFP-BFGS  starting  ({num_epochs} max iterations, {stitcher.total_size} variables)")
 
     result = tfp.optimizer.lbfgs_minimize(
         value_and_gradients,
@@ -338,4 +342,5 @@ def _minimize_tfp_lbfgs(pb, num_epochs):
     converged = bool(result.converged.numpy())
     num_itr = int(result.num_iterations.numpy())
     final_loss = float(result.objective_value.numpy())
-    print(f"  TFP-BFGS  done  iterations={num_itr}  loss={final_loss:.6e}  converged={converged}")
+    if pb._verbose:
+        print(f"  TFP-BFGS  done  iterations={num_itr}  loss={final_loss:.6e}  converged={converged}")
