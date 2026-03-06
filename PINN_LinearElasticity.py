@@ -11,23 +11,28 @@ from pinn_source.run import setup_trial
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         prog='PINN',
-        description='',
-        epilog='')
-    parser.add_argument('cuda', type=str)
+        description='Run PINNs inverse problem')
+    parser.add_argument('cuda', type=str,
+                        help='GPU ID(s): "0", "0,1,2" for multi-GPU, or "-" for CPU')
 
     args = parser.parse_args()
 
     #############################################################################
     # Program settings
     #############################################################################
-    parallel = False
-    exception_handling = False
-    num_processes = 1
 
     setup_file = 'pinn_source/config.json'
 
-    if args.cuda != "-":
-        os.environ["CUDA_VISIBLE_DEVICES"] = args.cuda
+    # Parse GPU IDs
+    if args.cuda == "-":
+        gpus = None
+        os.environ["CUDA_VISIBLE_DEVICES"] = ""
+    else:
+        gpus = [int(g) for g in args.cuda.split(',')]
+        if len(gpus) == 1:
+            # Single GPU: set env var before importing TF
+            os.environ["CUDA_VISIBLE_DEVICES"] = str(gpus[0])
+            gpus = None
 
     #############################################################################
     # Directories and file structure
@@ -57,7 +62,7 @@ if __name__ == '__main__':
     seeds = [3]
 
     keylist = [
-        'seed', 'SNR', 'numPDE', 'numBCN', 'numData', 'model/pressure', 'inverse_params/mu/net/layers', 'net/layers' 
+        'seed', 'SNR', 'numPDE', 'numBCN', 'numData', 'model/pressure', 'inverse_params/mu/net/layers', 'net/layers'
     ]
 
     #############################################################################
@@ -65,5 +70,4 @@ if __name__ == '__main__':
     #############################################################################
     from pinn_source.solver import run
 
-    setup_trial(run, setup_file, config, seeds, keylist, parallel=parallel, num_processes=num_processes,
-                exception_handling=exception_handling)
+    setup_trial(run, setup_file, config, seeds, keylist, gpus=gpus)

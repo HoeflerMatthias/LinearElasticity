@@ -83,8 +83,8 @@ def replace_item(obj, keylist, replace_value):
 #############################################################################
 # Multi processing
 #############################################################################
-def setup_trial(runfunc, setup_file, config, seeds, keylist, parallel = True, num_processes = 1, exception_handling = False, extract_params_from_setup = False):
-    # Open setup file
+
+def _build_paramlist(setup_file, config, seeds, keylist, extract_params_from_setup=False):
     with open(setup_file, 'r') as f:
         setup = json.load(f)
 
@@ -114,23 +114,87 @@ def setup_trial(runfunc, setup_file, config, seeds, keylist, parallel = True, nu
             if key != 'base_dir':
                 os.makedirs(os.path.join(base_dir, params['program'][key]), exist_ok=True)
 
-    if not parallel:
+    return paramlist
+
+
+def _gpu_worker(args):
+    """Worker that sets CUDA_VISIBLE_DEVICES before importing TF."""
+    gpu_id, run_module, run_func_name, arg = args
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
+
+    import importlib
+    mod = importlib.import_module(run_module)
+    runfunc = getattr(mod, run_func_name)
+    runfunc(arg)
+
+
+def setup_trial(runfunc, setup_file, config, seeds, keylist,
+                parallel=False, num_processes=1, gpus=None,
+                exception_handling=False, extract_params_from_setup=False):
+    """Build parameter combinations and run them.
+
+    Parameters
+    ----------
+    gpus : list[int] or None
+        GPU IDs to distribute runs across (e.g. [0, 1, 2]).
+        Each run is assigned to the next free GPU.  Requires the
+        run function to be importable by module path (uses spawn).
+        When set, *parallel* and *num_processes* are ignored.
+    """
+    paramlist = _build_paramlist(setup_file, config, seeds, keylist,
+                                 extract_params_from_setup)
+
+    if gpus and len(gpus) > 1:
+        _run_multi_gpu(runfunc, paramlist, gpus, exception_handling)
+    elif not parallel:
         for arg in paramlist:
             if exception_handling:
                 try:
                     runfunc(arg)
                 except Exception as inst:
-                    print(type(inst))  # the exception type
-                    print(inst.args)  # arguments stored in .args
+                    print(type(inst))
+                    print(inst.args)
                     print(inst)
                     print("error for ", arg)
             else:
                 runfunc(arg)
     else:
         with multiprocessing.Pool(processes=num_processes) as pool:
-            results = pool.map(runfunc, paramlist)
-
-            pool.close()
-            pool.join()
+            pool.map(runfunc, paramlist)
 
     return paramlist
+
+
+def _run_multi_gpu(runfunc, paramlist, gpus, exception_handling):
+    """Distribute runs across GPUs using a process pool with spawn context."""
+    import concurrent.futures
+
+    # Resolve module path for the run function so workers can import it
+    run_module = runfunc.__module__
+    run_func_name = runfunc.__qualname__
+
+    ctx = multiprocessing.get_context('spawn')
+    num_workers = len(gpus)
+
+    with concurrent.futures.ProcessPoolExecutor(
+        max_workers=num_workers, mp_context=ctx
+    ) as executor:
+        futures = {}
+        gpu_cycle = itertools.cycle(gpus)
+
+        for arg in paramlist:
+            gpu_id = next(gpu_cycle)
+            worker_args = (gpu_id, run_module, run_func_name, arg)
+            future = executor.submit(_gpu_worker, worker_args)
+            futures[future] = (gpu_id, arg[1])
+
+        for future in concurrent.futures.as_completed(futures):
+            gpu_id, filename = futures[future]
+            try:
+                future.result()
+                print(f"[GPU {gpu_id}] Done: {filename}")
+            except Exception as exc:
+                if exception_handling:
+                    print(f"[GPU {gpu_id}] Failed: {filename}: {exc}")
+                else:
+                    raise
