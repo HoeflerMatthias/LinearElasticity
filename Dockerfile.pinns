@@ -5,4 +5,4 @@ RUN pip install --no-cache-dir -r /tmp/requirements.pinns.txt
 
 WORKDIR /app
 
-ENTRYPOINT ["python", "PINN_LinearElasticity.py"]
+ENTRYPOINT ["python", "run_pinns.py"]

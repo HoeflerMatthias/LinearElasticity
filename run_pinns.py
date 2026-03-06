@@ -14,20 +14,18 @@ if __name__ == '__main__':
     base_dir = 'LinearElasticity_inclusion'
 
     #############################################################################
-    # Parameter
+    # Parameter sweep
     #############################################################################
 
     config = {
-        "numPDE": [8000],
-        "numBCN": [1000],
-        "numData": [1000],
+        "numData": [500, 1000, 2000],
 
-        "inverse_params/mu/net/wT": [0.0],
+        "net/layers": [[32, 32, 32], [64, 64, 64]],
+        "inverse_params/mu/net/layers": [[16, 16, 16], [32, 32, 32]],
 
-        "wPDE": [1e4*1e1],
-        "wFit": [1e6],
-        "wT": [0.0],
-        "wBCN": [1e4],
+        "wPDE": [1e3, 1e5],
+        "wFit": [1e5, 1e6],
+        "wBCN": [1e3, 1e4],
 
         "program/base_dir": [base_dir]
     }
@@ -35,7 +33,9 @@ if __name__ == '__main__':
     seeds = [3]
 
     keylist = [
-        'seed', 'SNR', 'numPDE', 'numBCN', 'numData',  'inverse_params/mu/net/layers', 'net/layers'
+        'seed', 'SNR', 'numData',
+        'inverse_params/mu/net/layers', 'net/layers',
+        'wPDE', 'wFit', 'wBCN',
     ]
 
     #############################################################################
