@@ -246,22 +246,9 @@ def run(args):
     loss_handler.setup_box_constraints(param_lambda, dataset, params['wM'], identifier=inverse_param,
                                        lower_bound=lower_bound, upper_bound=upper_bound)
 
-    if params['wP'] > 0.:
-        prior_scale = 2.0 * region_mu_max
-        weight_Prior = params['wP'] / (prior_scale ** 2)
-        prior_guess = sum(region_mu_values) / num_regions
-        loss_handler.setup_prior_loss(param_lambda, weight_Prior, identifier=inverse_param + '_prior',
-                                      prior_guess=prior_guess)
-
     # weight decay regularization
     if config['net']['wT'] > 0.0:
         loss_handler.setup_weight_decay_loss(param_models[inverse_param], config['net']['wT'], phases = ['main'], identifier = inverse_param + '_tikhonov')
-
-    # gradient penalty
-    if config['net']['wTV'] > 0.0:
-        param_model = lambda x: param_func[inverse_param](param_models[inverse_param](x))
-        loss_handler.setup_gradient_penalty_loss(param_model, config['net']['wTV'],
-                                                 identifier=inverse_param + '_tv')
 
     if params['adapt']:
         loss_handler.make_losses_adaptive(['fit', 'PDE', 'nxminus', 'nxplus', 'nyminus', 'nyplus', 'nzminus', 'nzplus'], 'main')

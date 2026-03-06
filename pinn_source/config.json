@@ -11,7 +11,6 @@
               "model_path": false,
               "layers": [16, 16, 16],
               "wT": 1e-1,
-              "wTV": 0.0,
               "fourier": false,
               "fourier_params": {
                   "sig": 3.0,
@@ -66,7 +65,6 @@
   "wBCN": 1e2,
   "wT": 1e-7,
   "wM": 0.0,
-  "wP": 0.0,
 
   "seed": 0,
 

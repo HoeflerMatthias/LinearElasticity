@@ -50,7 +50,6 @@ if __name__ == '__main__':
         "wFit": [1e6],
         "wT": [0.0],
         "wBCN": [1e4],
-        "wP": [0.0],
 
         "program/base_dir": [base_dir]
     }

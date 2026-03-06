@@ -175,21 +175,6 @@ class PINNLossHandler:
         for phase in phases:
             self.train_losses[phase] += [loss]
 
-    def setup_gradient_penalty_loss(self, model, weight: float, identifier: str = 'gradient_penalty', data = None):
-
-        model_func = lambda x: model(x)
-
-        weight_func = lambda x: tf.ones_like(x)
-        loss_func = lambda x: PINNLossHandler.gradient_penalty(x, model_func, weight_func, type = 'h1')
-
-        if data is not None:
-            loss = ns.Loss(identifier, lambda: loss_func(data), weight=weight, non_negative=True, display_sqrt=True)
-        else:
-            loss = ns.Loss(identifier, lambda data: loss_func(data['x_prior']), weight=weight, non_negative=True, display_sqrt=True)
-
-        self.train_losses['fit'] += [loss]
-        self.train_losses['main'] += [loss]
-
     def setup_box_constraints(self, model, dataset, weight: float, identifier: str = 'box', lower_bound=None, upper_bound=None):
 
         _,_, num_batched = dataset.get_data('x_prior', 'reg', 'train')
@@ -205,13 +190,6 @@ class PINNLossHandler:
             max_loss = ns.LossMeanSquares(identifier + '_max', max_loss_func, weight=weight, expected_shape=(num_batched, 1))
 
             self.train_losses['main'] += [max_loss]
-
-    def setup_prior_loss(self, model, weight: float, identifier: str = 'prior', prior_guess = 0.):
-
-        loss_func = lambda data: model(data['x_prior']) - prior_guess
-        loss = ns.LossMeanSquares(identifier, loss_func, weight=weight, expected_shape=(None, 1))
-
-        self.train_losses['main'] += [loss]
 
     def setup_dice_loss(self, model, dataset, threshold, identifier: str = 'dice'):
 
@@ -284,30 +262,6 @@ class PINNLossHandler:
 #############################################################################
 # Loss utilities
 #############################################################################
-
-    @staticmethod
-    def gradient_penalty(x, model, weight_func = None, type: str = 'h1'):
-        with ns.GradientTape(persistent=False, watch_accessed_variables=False) as tape:
-            tape.watch(x)
-
-            y = model(x)
-
-            grad = tape.gradient(y, x)
-
-            if weight_func is not None:
-                weights = weight_func(x)
-                grad = tf.math.multiply(weights, grad)
-
-            inner = tf.math.multiply(grad, grad)
-
-            if type == 'tv':
-                res = tf.math.sqrt(1e-2 + inner)
-            elif type == 'l1':
-                res = tf.norm(grad, ord=1.000001, axis=0)
-            elif type == 'h1':
-                res = inner
-
-        return tf.math.reduce_sum(res)
 
     @staticmethod
     def dice(y_true, y_pred):
