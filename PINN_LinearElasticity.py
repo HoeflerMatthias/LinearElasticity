@@ -1,38 +1,11 @@
 #!/usr/bin/env python3
 
 # %%
-import argparse
-import os
 from pinn_source.run import setup_trial
 
-#############################################################################
-# Console arguments
-#############################################################################
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(
-        prog='PINN',
-        description='Run PINNs inverse problem')
-    parser.add_argument('cuda', type=str,
-                        help='GPU ID(s): "0", "0,1,2" for multi-GPU, or "-" for CPU')
-
-    args = parser.parse_args()
-
-    #############################################################################
-    # Program settings
-    #############################################################################
 
     setup_file = 'pinn_source/config.json'
-
-    # Parse GPU IDs
-    if args.cuda == "-":
-        gpus = None
-        os.environ["CUDA_VISIBLE_DEVICES"] = ""
-    else:
-        gpus = [int(g) for g in args.cuda.split(',')]
-        if len(gpus) == 1:
-            # Single GPU: set env var before importing TF
-            os.environ["CUDA_VISIBLE_DEVICES"] = str(gpus[0])
-            gpus = None
 
     #############################################################################
     # Directories and file structure
@@ -66,8 +39,8 @@ if __name__ == '__main__':
     ]
 
     #############################################################################
-    # Multi processing
+    # Run
     #############################################################################
     from pinn_source.solver import run
 
-    setup_trial(run, setup_file, config, seeds, keylist, gpus=gpus)
+    setup_trial(run, setup_file, config, seeds, keylist)

@@ -117,6 +117,16 @@ def _build_paramlist(setup_file, config, seeds, keylist, extract_params_from_set
     return paramlist
 
 
+def _detect_gpus():
+    """Return list of GPU IDs visible to TensorFlow."""
+    try:
+        import tensorflow as tf
+        gpus = tf.config.list_physical_devices('GPU')
+        return list(range(len(gpus)))
+    except Exception:
+        return []
+
+
 def _gpu_worker(args):
     """Worker that sets CUDA_VISIBLE_DEVICES before importing TF."""
     gpu_id, run_module, run_func_name, arg = args
@@ -129,24 +139,21 @@ def _gpu_worker(args):
 
 
 def setup_trial(runfunc, setup_file, config, seeds, keylist,
-                parallel=False, num_processes=1, gpus=None,
                 exception_handling=False, extract_params_from_setup=False):
     """Build parameter combinations and run them.
 
-    Parameters
-    ----------
-    gpus : list[int] or None
-        GPU IDs to distribute runs across (e.g. [0, 1, 2]).
-        Each run is assigned to the next free GPU.  Requires the
-        run function to be importable by module path (uses spawn).
-        When set, *parallel* and *num_processes* are ignored.
+    Auto-detects available GPUs. With multiple GPUs and multiple runs,
+    distributes work round-robin across GPUs using spawned processes.
+    With a single GPU (or single run), runs sequentially.
     """
     paramlist = _build_paramlist(setup_file, config, seeds, keylist,
                                  extract_params_from_setup)
 
-    if gpus and len(gpus) > 1:
+    gpus = _detect_gpus()
+
+    if len(gpus) > 1 and len(paramlist) > 1:
         _run_multi_gpu(runfunc, paramlist, gpus, exception_handling)
-    elif not parallel:
+    else:
         for arg in paramlist:
             if exception_handling:
                 try:
@@ -158,9 +165,6 @@ def setup_trial(runfunc, setup_file, config, seeds, keylist,
                     print("error for ", arg)
             else:
                 runfunc(arg)
-    else:
-        with multiprocessing.Pool(processes=num_processes) as pool:
-            pool.map(runfunc, paramlist)
 
     return paramlist
 
