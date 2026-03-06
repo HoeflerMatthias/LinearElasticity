@@ -163,16 +163,13 @@ def run(args):
     inverse_param = 'mu'
     config = params['inverse_params'][inverse_param]
 
-    scaling = tf.constant(1.0, dtype=ns.config.get_dtype())
-    mean = tf.constant(0.0, dtype=ns.config.get_dtype())
-
     if config['net']["model_path"]:
         model_param = load_network(config['net']["model_path"])
     else:
         input_mean = np.mean(data_handler.x_mesh,axis=0)
         input_variance = tf.math.pow(data_handler.mesh_sizes, 2)
-        output_mean = mean
-        output_variance = tf.math.pow(scaling, 2)
+        output_mean = tf.constant(0.0, dtype=ns.config.get_dtype())
+        output_variance = tf.constant(1.0, dtype=ns.config.get_dtype())
 
         model_param = get_network(dim, input_mean, input_variance, 1, output_mean, output_variance,
                                   config['net'], np_random_generator, name=inverse_param)
