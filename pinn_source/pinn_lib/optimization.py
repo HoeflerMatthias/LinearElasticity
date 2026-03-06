@@ -173,39 +173,53 @@ def minimize(pb, method, optimizer_or_name, num_epochs=1000, verbose=True):
 # --------------------------------------------------------------------------- #
 
 def _minimize_keras(pb, optimizer, num_epochs):
-    for epoch in range(num_epochs):
-        # Advance mini-batch
-        if pb.data is not None:
-            pb.data.advance()
-        data = pb.data.current_batch if pb.data is not None else None
+    trainable_vars = pb.variables
+    uses_minibatch = (pb.data is not None
+                      and any(ds.batch_size is not None for ds in pb.data.datasets))
 
-        # Forward + backward
+    # For full-batch: pre-fetch once and trace with constant data
+    if pb.data is not None:
+        pb.data.advance()
+
+    @tf.function
+    def train_step():
+        data = pb.data.current_batch if pb.data is not None else None
         with tf.GradientTape() as tape:
-            loss_values = {}
             total_loss = tf.constant(0.0, dtype=tf.float64)
+            loss_vals = []
             for loss in pb.train_losses:
                 val = loss(data)
-                loss_values[loss.name] = val
+                loss_vals.append(val)
                 total_loss = total_loss + val
 
-        grads = tape.gradient(total_loss, pb.variables)
+        grads = tape.gradient(total_loss, trainable_vars)
         grads_and_vars = [
-            (g, v) for g, v in zip(grads, pb.variables) if g is not None
+            (g, v) for g, v in zip(grads, trainable_vars) if g is not None
         ]
         optimizer.apply_gradients(grads_and_vars)
+        return total_loss, loss_vals
+
+    has_callbacks = len(pb.callbacks) > 0
+
+    for epoch in range(num_epochs):
+        if uses_minibatch:
+            pb.data.advance()
+
+        total_loss, loss_vals = train_step()
 
         # Log train losses (every 100 steps to avoid GPU sync stalls)
         if epoch % 100 == 0:
-            for loss in pb.train_losses:
+            for loss, val in zip(pb.train_losses, loss_vals):
                 pb.history['losses'][loss.name]['log'].append(
-                    float(loss_values[loss.name].numpy())
+                    float(val.numpy())
                 )
             if pb._verbose:
                 print(f"  Adam  {epoch:>6d}/{num_epochs}  loss={total_loss.numpy():.6e}")
 
         # Callbacks
-        for cb in pb.callbacks:
-            cb(pb, epoch, epoch)
+        if has_callbacks:
+            for cb in pb.callbacks:
+                cb(pb, epoch, epoch)
 
 
 # --------------------------------------------------------------------------- #

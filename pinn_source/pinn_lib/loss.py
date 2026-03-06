@@ -1,4 +1,22 @@
+import inspect
 import tensorflow as tf
+
+
+def _accepts_arg(func):
+    """Check whether *func* accepts a positional argument (beyond self)."""
+    try:
+        sig = inspect.signature(func)
+        params = [p for p in sig.parameters.values()
+                  if p.name != 'self']
+        if not params:
+            return False
+        first = params[0]
+        return first.kind in (
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        )
+    except (ValueError, TypeError):
+        return True  # fallback: assume it takes data
 
 
 class Loss:
@@ -22,6 +40,7 @@ class Loss:
     def __init__(self, name, loss_func, weight=1.0, non_negative=False, display_sqrt=False):
         self.name = name
         self._loss_func = loss_func
+        self._takes_data = _accepts_arg(loss_func) if loss_func is not None else False
         if isinstance(weight, (tf.Variable, tf.Tensor)):
             self.weight = weight
         else:
@@ -30,10 +49,9 @@ class Loss:
         self.display_sqrt = display_sqrt
 
     def loss_base_call(self, data=None):
-        try:
+        if self._takes_data:
             return self._loss_func(data)
-        except TypeError:
-            return self._loss_func()
+        return self._loss_func()
 
     def __call__(self, data=None):
         return self.weight * self.loss_base_call(data)
@@ -60,6 +78,7 @@ class LossMeanSquares(Loss):
     def __init__(self, name, eval_roots, weight=1.0, normalization=1.0, expected_shape=None):
         super().__init__(name, None, weight)
         self._eval_roots = eval_roots
+        self._roots_takes_data = _accepts_arg(eval_roots)
         self.normalization = normalization
         self.expected_shape = expected_shape
         self.dtype = tf.float64
@@ -67,10 +86,9 @@ class LossMeanSquares(Loss):
     # -- dispatch helper -------------------------------------------------- #
 
     def _eval_roots_dispatch(self, data=None):
-        try:
+        if self._roots_takes_data:
             return self._eval_roots(data)
-        except TypeError:
-            return self._eval_roots()
+        return self._eval_roots()
 
     # -- core interface --------------------------------------------------- #
 
