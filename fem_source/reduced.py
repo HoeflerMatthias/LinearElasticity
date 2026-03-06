@@ -4,7 +4,7 @@ from firedrake import *
 import numpy as np
 from scipy.optimize import minimize
 
-from fem_source import (
+from . import (
     L2_error, rel_L2_error, pointwise_rel_L2_error, InvScarResult,
     create_box_mesh, create_spaces, symmetry_bcs,
     make_forward_solver, regularization_functionals,
@@ -148,8 +148,8 @@ def invscar(**params):
         'err_u_abs_hist': err_u_abs_hist,
         'err_u_rel_hist': err_u_rel_hist,
         'err_alpha_pwrel_hist': err_alpha_pwrel_hist,
-        'J_fid_final': J_fid,
-        'J_reg_final': J_reg,
+        'J_fid_final': float(J_fid),
+        'J_reg_final': float(J_reg),
         'err_u_abs_final': float(final_u_abs),
         'err_u_rel_final': float(final_u_rel),
         'err_alpha_pwrel_final': float(final_alpha_pwrel),

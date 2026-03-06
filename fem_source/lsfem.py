@@ -4,7 +4,7 @@ from firedrake import *
 import numpy as np
 from scipy.optimize import minimize
 
-from fem_source import (
+from . import (
     L2_error, rel_L2_error, pointwise_rel_L2_error, InvScarResult,
     create_box_mesh, create_spaces, symmetry_bcs,
     regularization_functionals,
@@ -14,14 +14,6 @@ from fem_source import (
 
 __all__ = ["invscar"]
 
-
-def fmt(p):
-    """LSFEM-specific tag with extra weight keys."""
-    return (f"reg{p['J_regu']}_lam{float(p['lam_reg'])}_j{float(p['lam_jump'])}_P{p['P']}_"
-            f"Ninv{p['Nx_inv']}x{p['Ny_inv']}x{p['Nz_inv']}_"
-            f"weight{float(p['lam_dat'])}x{float(p['lam_pde'])}x{float(p['lam_bcn'])}_"
-            f"noise{p['noise_level']}"
-    )
 
 
 def invscar(**params):
@@ -253,17 +245,17 @@ def invscar(**params):
     }
 
     metrics = {
-        'J_hist': J_hist,
+        'J_fid_hist': J_hist,
         'term_hist': term_hist,
         'err_u_abs_hist': err_u_abs_hist,
         'err_u_rel_hist': err_u_rel_hist,
         'err_alpha_pwrel_hist': err_alpha_pwrel_hist,
-        'J_final': J_final,
-        'final_terms': final_terms,
+        'J_fid_final': float(J_final),
+        'J_reg_final': float(final_terms.get('reg', 0.0)),
         'err_u_abs_final': float(final_u_abs),
         'err_u_rel_final': float(final_u_rel),
         'err_alpha_pwrel_final': float(final_alpha_pwrel),
-        'n_outer': n_outer,
+        'nit': n_outer,
         'nfev': total_nfev,
         'iter_hist': iter_hist,
         'wall_time': wall_time,

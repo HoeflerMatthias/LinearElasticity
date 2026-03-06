@@ -2,7 +2,7 @@ from firedrake import *
 import numpy as np
 from petsc4py import PETSc
 
-from fem_source import (
+from . import (
     L2_error, rel_L2_error, pointwise_rel_L2_error, InvScarResult,
     create_box_mesh, create_spaces, symmetry_bcs,
     solve_forward,
@@ -51,7 +51,7 @@ def invscar(**params):
 
     w_i = Function(W_i)
     u_i, alpha_i, p_i = split(w_i)
-    u_ifun, alpha_ifun, p_ifunc = w_i.subfunctions
+    u_ifun, alpha_ifun, _ = w_i.subfunctions
 
     psi_i = TestFunction(W_i)
     v_i, beta_i, q_i = split(psi_i)

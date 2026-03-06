@@ -342,10 +342,13 @@ def run(args):
             filename_list += [params['program']['base_dir'] + '/' + params['program'][
                 'model_dir'] + '/' + inverse_param + '_' + filename + '.keras']
 
+    if 'mu' in param_models:
+        param_lambda = lambda x: param_func['mu'](param_models['mu'](x))
+    else:
+        param_lambda = None
+
     def plot_save_callback(pb, itr, itr_round, frequency=1000):
         if itr % frequency == 0 and itr > 0:
-            #param_lambda = lambda x: field_model(x) 
-            param_lambda = lambda x: param_func['mu'](param_models['mu'](x))
             save_plots(data_handler, model, param_lambda, filename, params, plot_solution=True)
 
     # add weight histories and parameters to json output of optimization problem
@@ -453,17 +456,34 @@ def run(args):
                                           'solution_weight_dir'] + '/bc_' + filename + '.png')
         # plot rba weight for fit if applicable
         if 'fit' in params['RBA_params']['losses']:
-            data_plotter.plot_weights(
+            data_plotter.plot_weights(data_handler,
                 [loss_handler.get_loss_by_name('fit', 'main', 'train')],
                 [dataset.get_data('x_displacement', 'fit', 'train')[0]],
                 filename=params['program']['base_dir'] + '/' + params['program'][
                     'solution_weight_dir'] + '/fit_' + filename + '.png')
 
         # last call to save callback
-        param_lambda = lambda x: param_func['mu'](param_models['mu'](x))
         save_plots(data_handler, model, param_lambda, filename, params, plot_solution=True)
 
-        # plot faces
-        #data_plotter.plot_faces(dataset, loss_handler, draw=False, block=False,
-        #                        filename=params['program']['base_dir'] + '/' + params['program'][
-        #                            'solution_bc_dir'] + '/' + filename + '.png')
+    #############################################################################
+    # MLflow logging
+    #############################################################################
+    mlflow_uri = os.environ.get("MLFLOW_TRACKING_URI")
+    if mlflow_uri:
+        import mlflow
+        from pinn_source.mlflow_logging import log_pinns_to_mlflow
+
+        mlflow.set_tracking_uri(mlflow_uri)
+        mlflow.set_experiment(os.environ.get("MLFLOW_EXPERIMENT", "lin_elast:pinns"))
+
+        # Collect post-processing output directories to log as artifacts
+        base = params['program']['base_dir']
+        artifact_dirs = [
+            os.path.join(base, params['program'][key])
+            for key in ['solution_dir', 'solution_field_dir',
+                        'solution_weight_dir', 'model_dir']
+            if key in params['program']
+        ]
+
+        log_pinns_to_mlflow(params, filename, loss_handler, train_handler,
+                            artifact_dirs=artifact_dirs)
