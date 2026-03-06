@@ -30,7 +30,7 @@
     }
   },
 
-  "data": "data/linear_symcube_p10.csv",
+  "data": "data/linear_symcube_inclusion_p10.csv",
 
   "model": {
       "body_force": [0.0, 0.0, 0.0],
@@ -46,7 +46,7 @@
 
   "mesh_loss": false,
 
-  "bfgs_backend": "scipy",
+  "bfgs_backend": "tfp",
 
   "adam1": 200,
   "bfgs1": 200,
@@ -67,7 +67,7 @@
 
   "batch_size": 1.0,
 
-  "adapt": true,
+  "adapt": false,
   "adapt_alpha": 0.1,
   "RBA": true,
   "RBA_params": {

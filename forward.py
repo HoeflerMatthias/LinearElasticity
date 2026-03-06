@@ -1,5 +1,6 @@
 from firedrake import *
 import numpy as np
+import argparse
 from pathlib import Path
 
 from fem_source import create_box_mesh, create_spaces, symmetry_bcs, solve_forward
@@ -53,6 +54,15 @@ def generate_and_save(name, alpha_expr, mm, V, Q, bcs, lambda_, mu, p_load):
     print(f"  CSV:  {csv_path}  ({coords.shape[0]} points)")
 
 
+# ── CLI ───────────────────────────────────────────────────────
+
+CASES = ["split", "inclusion"]
+
+parser = argparse.ArgumentParser(description="Generate forward elasticity data.")
+parser.add_argument("cases", nargs="*", default=CASES, choices=CASES,
+                    help="Test cases to run (default: all)")
+args = parser.parse_args()
+
 # ── Common setup ──────────────────────────────────────────────
 
 Nx_t, Ny_t, Nz_t = 80, 80, 40
@@ -70,23 +80,28 @@ x_t = SpatialCoordinate(mm_true)
 # ── Test case 1: diagonal split ──────────────────────────────
 # alpha = 1 where x < y, alpha = 2 otherwise
 
-alpha_split = conditional(x_t[0] < x_t[1], 1.0, 2.0)
+if "split" in args.cases:
+    alpha_split = conditional(x_t[0] < x_t[1], 1.0, 2.0)
 
-generate_and_save("linear_symcube_p10", alpha_split,
-                  mm_true, V_t, Q_t, bcs_t, lambda_, mu, p_load)
+    generate_and_save("linear_symcube_p10", alpha_split,
+                      mm_true, V_t, Q_t, bcs_t, lambda_, mu, p_load)
 
-# ── Test case 2: two cylindrical inclusions (along z-axis) ───
-# Circular inclusion:  center (0.7, 1.0), radius 0.3, alpha = 2
-# Elliptical inclusion: center (1.4, 1.0), semi-axes a=0.4, b=0.2, alpha = 2
-# Background: alpha = 1
+# ── Test case 2: three elliptical inclusions (along z-axis) ───
+# Each: (cx, cy, a, b, alpha_val)
 
-r_circ_sq = (x_t[0] - 0.7)**2 + (x_t[1] - 1.0)**2
-in_circle = r_circ_sq < 0.3**2
+if "inclusion" in args.cases:
+    inclusions = [
+        {"cx": 0.5, "cy": 0.5, "a": 0.35, "b": 0.35, "alpha": 1.75},
+        {"cx": 0.75, "cy": 1.2, "a": 0.4, "b": 0.20, "alpha": 2.0},
+        {"cx": 1.4, "cy": 0.6, "a": 0.50, "b": 0.25, "alpha": 2.25},
+    ]
+    alpha_bg = 1.0
 
-r_ell_sq = ((x_t[0] - 1.4) / 0.4)**2 + ((x_t[1] - 1.0) / 0.2)**2
-in_ellipse = r_ell_sq < 1.0
+    alpha_inclusion = Constant(alpha_bg)
+    for inc in inclusions:
+        inside = ((x_t[0] - inc["cx"]) / inc["a"])**2 \
+               + ((x_t[1] - inc["cy"]) / inc["b"])**2 < 1.0
+        alpha_inclusion = conditional(inside, inc["alpha"], alpha_inclusion)
 
-alpha_inclusion = conditional(Or(in_circle, in_ellipse), 2.0, 1.0)
-
-generate_and_save("linear_symcube_inclusion_p10", alpha_inclusion,
-                  mm_true, V_t, Q_t, bcs_t, lambda_, mu, p_load)
+    generate_and_save("linear_symcube_inclusion_p10", alpha_inclusion,
+                      mm_true, V_t, Q_t, bcs_t, lambda_, mu, p_load)

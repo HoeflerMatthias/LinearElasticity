@@ -11,7 +11,7 @@ if __name__ == '__main__':
     # Directories and file structure
     #############################################################################
 
-    base_dir = 'LinearElasticity_paper'
+    base_dir = 'LinearElasticity_inclusion'
 
     #############################################################################
     # Parameter
@@ -35,7 +35,7 @@ if __name__ == '__main__':
     seeds = [3]
 
     keylist = [
-        'seed', 'SNR', 'numPDE', 'numBCN', 'numData', 'model/pressure', 'inverse_params/mu/net/layers', 'net/layers'
+        'seed', 'SNR', 'numPDE', 'numBCN', 'numData',  'inverse_params/mu/net/layers', 'net/layers'
     ]
 
     #############################################################################
