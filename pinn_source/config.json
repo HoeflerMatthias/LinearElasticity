@@ -1,7 +1,6 @@
 {
   "inverse_params": {
       "mu": {
-          "on": true,
           "sigmoid_scalings": [1.0, 30.0],
           "initial_factor": 1.5,
           "min_factor": 0.5,
@@ -10,7 +9,6 @@
           "max_value": 10.0,
           "net": {
               "model_path": false,
-              "on": true,
               "layers": [16, 16, 16],
               "wT": 1e-1,
               "wTV": 0.0,

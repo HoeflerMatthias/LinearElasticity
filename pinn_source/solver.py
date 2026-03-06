@@ -146,12 +146,8 @@ def run(args):
     else:
         input_mean = tf.math.pow(data_handler.mesh_sizes, 2)
         input_variance = tf.math.pow(data_handler.mesh_sizes, 2)
-        if params['inverse_params']['mu']['on']:
-            output_mean = np.mean(data_handler.get_displacement()[0], axis=0)
-            output_variance = tf.math.pow(np.max(np.abs(data_handler.get_displacement()[0]), axis=0), 2)
-        else:
-            output_mean = [1., 1., 1.]
-            output_variance = [1., 1., 1.]
+        output_mean = np.mean(data_handler.get_displacement()[0], axis=0)
+        output_variance = tf.math.pow(np.max(np.abs(data_handler.get_displacement()[0]), axis=0), 2)
 
 
 
@@ -168,34 +164,23 @@ def run(args):
 
     inverse_param = 'mu'
     config = params['inverse_params'][inverse_param]
-    if config['on']:
 
-        # model parameter as field
-        if config['net']['on']:
-            scaling = tf.constant(1.0, dtype=ns.config.get_dtype())
-            mean = tf.constant(0.0, dtype=ns.config.get_dtype())
+    scaling = tf.constant(1.0, dtype=ns.config.get_dtype())
+    mean = tf.constant(0.0, dtype=ns.config.get_dtype())
 
-            if config['net']["model_path"]:
-                model_param = load_network(config['net']["model_path"])
-            else:
-                input_mean = np.mean(data_handler.x_mesh,axis=0)
-                input_variance = tf.math.pow(data_handler.mesh_sizes, 2)
-                output_mean = mean
-                output_variance = tf.math.pow(scaling, 2)
+    if config['net']["model_path"]:
+        model_param = load_network(config['net']["model_path"])
+    else:
+        input_mean = np.mean(data_handler.x_mesh,axis=0)
+        input_variance = tf.math.pow(data_handler.mesh_sizes, 2)
+        output_mean = mean
+        output_variance = tf.math.pow(scaling, 2)
 
-                model_param = get_network(dim, input_mean, input_variance, 1, output_mean, output_variance,
-                                          config['net'], np_random_generator, name=inverse_param)
+        model_param = get_network(dim, input_mean, input_variance, 1, output_mean, output_variance,
+                                  config['net'], np_random_generator, name=inverse_param)
 
-            model_param.summary()
-            param_models[inverse_param] = model_param
-
-        # model parameter as scalar (two-region case)
-        else:
-            left = tf.Variable(inv_param_func[inverse_param](region_mu_min * config['initial_factor']),dtype=ns.config.get_dtype(), name="region_1")
-            right = tf.Variable(inv_param_func[inverse_param](region_mu_max * config['initial_factor']),dtype=ns.config.get_dtype(), name="region_2")
-
-            model_param = lambda x: tf.expand_dims(tf.where(x[:,0] < x[:,1], left, right),-1)
-            param_models[inverse_param] = model_param
+    model_param.summary()
+    param_models[inverse_param] = model_param
     
     # Loss definition
     ####################
@@ -205,7 +190,6 @@ def run(args):
 
     # fit losses
     weight_FIT = params['wFit'] / (u_max ** 2)
-    #if params['inverse_params']['mu']['on']:
     loss_handler.setup_fit_losses(model, dataset, weight_FIT, 1.0)
 
     # pde losses
@@ -239,56 +223,45 @@ def run(args):
     # weight decay regularization
     if params['wT'] > 0.:
         loss_handler.setup_weight_decay_loss(model, params['wT'], phases = ['fit'])
-    # inverse problem
-    for inverse_param in params['inverse_params']:
-        config = params['inverse_params'][inverse_param]
-        if config['on']:
-            param_lambda = lambda x: param_func[inverse_param](param_models[inverse_param](x))
+    # inverse problem losses (mu as field)
+    param_lambda = lambda x: param_func[inverse_param](param_models[inverse_param](x))
 
-            # dice test loss
-            if config['net']['on'] and num_regions > 1:
-                threshold = params['inverse_params'][inverse_param]['threshold'] * \
-                            params['inverse_params'][inverse_param]['max_value']
-                loss_handler.setup_dice_loss(param_lambda, dataset, threshold, identifier=inverse_param + '_dice')
+    # dice test loss
+    if num_regions > 1:
+        threshold = config['threshold'] * config['max_value']
+        loss_handler.setup_dice_loss(param_lambda, dataset, threshold, identifier=inverse_param + '_dice')
 
-            # region wise error losses
-            if config['net']['on'] and num_regions > 1:
-                loss_handler.setup_relative_region_error_losses(param_lambda, dataset,
-                                                                identifier=inverse_param + '_error')
+    # region wise error losses
+    if num_regions > 1:
+        loss_handler.setup_relative_region_error_losses(param_lambda, dataset,
+                                                        identifier=inverse_param + '_error')
 
-            # total error test loss
-            if config['net']['on']:
-                loss_handler.setup_relative_error_loss(param_lambda, dataset, identifier=inverse_param + '_error')
+    # total error test loss
+    loss_handler.setup_relative_error_loss(param_lambda, dataset, identifier=inverse_param + '_error')
 
-            # per-region relative error (scalar or network)
-            if not config['net']['on'] and num_regions > 1:
-                loss_handler.setup_relative_region_error_losses(param_lambda, dataset,
-                                                                identifier=inverse_param + '_error')
+    # box constraints
+    lower_bound = region_mu_min * config['min_factor']
+    upper_bound = region_mu_max * config['max_factor']
 
-            # box constraints
-            lower_bound = region_mu_min * config['min_factor']
-            upper_bound = region_mu_max * config['max_factor']
+    loss_handler.setup_box_constraints(param_lambda, dataset, params['wM'], identifier=inverse_param,
+                                       lower_bound=lower_bound, upper_bound=upper_bound)
 
-            loss_handler.setup_box_constraints(param_lambda, dataset, params['wM'], identifier=inverse_param,
-                                               lower_bound=lower_bound, upper_bound=upper_bound)
+    if params['wP'] > 0.:
+        prior_scale = 2.0 * region_mu_max
+        weight_Prior = params['wP'] / (prior_scale ** 2)
+        prior_guess = sum(region_mu_values) / num_regions
+        loss_handler.setup_prior_loss(param_lambda, weight_Prior, identifier=inverse_param + '_prior',
+                                      prior_guess=prior_guess)
 
-            if params['wP'] > 0.:
-                prior_scale = 2.0 * region_mu_max
-                weight_Prior = params['wP'] / (prior_scale ** 2)
-                prior_guess = sum(region_mu_values) / num_regions
-                loss_handler.setup_prior_loss(param_lambda, weight_Prior, identifier=inverse_param + '_prior',
-                                              prior_guess=prior_guess)
+    # weight decay regularization
+    if config['net']['wT'] > 0.0:
+        loss_handler.setup_weight_decay_loss(param_models[inverse_param], config['net']['wT'], phases = ['main'], identifier = inverse_param + '_tikhonov')
 
-            if config['net']['on']:
-                # weight decay regularization
-                if config['net']['wT'] > 0.0:
-                    loss_handler.setup_weight_decay_loss(param_models[inverse_param], config['net']['wT'], phases = ['main'], identifier = inverse_param + '_tikhonov')
-
-                # gradient penalty
-                if config['net']['wTV'] > 0.0:
-                    param_model = lambda x: param_func[inverse_param](param_models[inverse_param](x))
-                    loss_handler.setup_gradient_penalty_loss(param_model, config['net']['wTV'],
-                                                             identifier=inverse_param + '_tv')
+    # gradient penalty
+    if config['net']['wTV'] > 0.0:
+        param_model = lambda x: param_func[inverse_param](param_models[inverse_param](x))
+        loss_handler.setup_gradient_penalty_loss(param_model, config['net']['wTV'],
+                                                 identifier=inverse_param + '_tv')
 
     if params['adapt']:
         loss_handler.make_losses_adaptive(['fit', 'PDE', 'nxminus', 'nxplus', 'nyminus', 'nyplus', 'nzminus', 'nzplus'], 'main')
@@ -301,25 +274,14 @@ def run(args):
         'main': []
     }
 
-    model_variables = model.variables #[m.value for m in model.variables]
+    model_variables = model.variables
     phase_variables['fit'] += model_variables
-    # phase_variables[1] += model_variables
     phase_variables['main'] += model_variables
 
-    # Inverse problem
-    has_inverse_problem = False
-    for inverse_param in params['inverse_params']:
-        config = params['inverse_params'][inverse_param]
-        if config['on']:
-            if config['net']['on']:
-                param_variables = param_models[inverse_param].variables
-                phase_variables['fit'] += param_variables
-                phase_variables['physics'] += param_variables
-                phase_variables['main'] += param_variables
-            else:
-                phase_variables['physics'] += [left, right]
-                phase_variables['main'] += [left, right]
-            has_inverse_problem = True
+    param_variables = param_models['mu'].variables
+    phase_variables['fit'] += param_variables
+    phase_variables['physics'] += param_variables
+    phase_variables['main'] += param_variables
     
     #############################################################################
     # Training
@@ -329,20 +291,13 @@ def run(args):
     data_plotter = DataPlotter()
 
     # prepare models and filenames for setting save points during training
-    model_list = [model]
-    filename_list = [params['program']['base_dir'] + '/' + params['program']['model_dir'] + '/' + filename + '.keras']
+    model_list = [model, param_models['mu']]
+    filename_list = [
+        params['program']['base_dir'] + '/' + params['program']['model_dir'] + '/' + filename + '.keras',
+        params['program']['base_dir'] + '/' + params['program']['model_dir'] + '/mu_' + filename + '.keras',
+    ]
 
-    for inverse_param in params['inverse_params']:
-        config = params['inverse_params'][inverse_param]
-        if config['on'] and config['net']['on']:
-            model_list += [param_models[inverse_param]]
-            filename_list += [params['program']['base_dir'] + '/' + params['program'][
-                'model_dir'] + '/' + inverse_param + '_' + filename + '.keras']
-
-    if 'mu' in param_models:
-        param_lambda = lambda x: param_func['mu'](param_models['mu'](x))
-    else:
-        param_lambda = None
+    param_lambda = lambda x: param_func['mu'](param_models['mu'](x))
 
     # add weight histories and parameters to json output of optimization problem
     def train_preparation_callback(pb: ns.OptimizationProblem):
@@ -396,7 +351,7 @@ def run(args):
 
     # Step 2: only physics
     ####################
-    if params['phases'][1] and has_inverse_problem:
+    if params['phases'][1]:
         t0 = _time.perf_counter()
 
         train_handler.train_physics(params['lr1'], params['adam1'], params['bfgs2'], data=collocation_points, bfgs_backend=bfgs_backend)
