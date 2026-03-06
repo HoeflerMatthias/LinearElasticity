@@ -368,6 +368,9 @@ def run(args):
         ####################
         train_handler.save_models(model_list, filename_list)
 
+        # save history JSON and loss-curve plots for all phases
+        train_handler.finalize_all()
+
         # plotting
         ####################
 
