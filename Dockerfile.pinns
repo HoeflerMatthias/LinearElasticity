@@ -1,7 +1,7 @@
 FROM tensorflow/tensorflow:2.17.0-gpu
 
 COPY requirements.pinns.txt /tmp/requirements.pinns.txt
-RUN pip install --no-cache-dir -r /tmp/requirements.pinns.txt
+RUN pip install --no-cache-dir --ignore-installed blinker -r /tmp/requirements.pinns.txt
 
 WORKDIR /app
 
