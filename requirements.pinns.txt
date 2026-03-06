@@ -7,4 +7,4 @@ matplotlib==3.9.4
 more-itertools
 pillow==10.4.0
 h5py==3.11.0
-mlflow==3.9.0
+mlflow-skinny==3.9.0
