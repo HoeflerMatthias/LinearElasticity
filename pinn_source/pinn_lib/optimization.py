@@ -172,7 +172,7 @@ def minimize(pb, method, optimizer_or_name, num_epochs=1000, verbose=True):
 # Keras (Adam, etc.)
 # --------------------------------------------------------------------------- #
 
-def _minimize_keras(pb, optimizer, num_epochs):
+def _minimize_keras(pb, optimizer, num_epochs, log_frequency=100):
     trainable_vars = pb.variables
     uses_minibatch = (pb.data is not None
                       and any(ds.batch_size is not None for ds in pb.data.datasets))
@@ -181,34 +181,49 @@ def _minimize_keras(pb, optimizer, num_epochs):
     if pb.data is not None:
         pb.data.advance()
 
-    @tf.function
-    def train_step():
-        data = pb.data.current_batch if pb.data is not None else None
-        with tf.GradientTape() as tape:
-            total_loss = tf.constant(0.0, dtype=tf.float64)
-            loss_vals = []
-            for loss in pb.train_losses:
-                val = loss(data)
-                loss_vals.append(val)
-                total_loss = total_loss + val
+    # Determine how many steps to batch on GPU before returning to Python.
+    # Must align with callback frequencies so they fire at the right time.
+    callback_freqs = [getattr(cb, 'frequency', log_frequency)
+                      for cb in pb.callbacks]
+    # GCD of all frequencies gives the largest safe batch size
+    from math import gcd
+    from functools import reduce
+    all_freqs = [log_frequency] + callback_freqs
+    steps_per_call = reduce(gcd, all_freqs)
 
-        grads = tape.gradient(total_loss, trainable_vars)
-        grads_and_vars = [
-            (g, v) for g, v in zip(grads, trainable_vars) if g is not None
-        ]
-        optimizer.apply_gradients(grads_and_vars)
+    @tf.function
+    def train_n_steps(n):
+        """Run n forward+backward+apply steps entirely on GPU."""
+        data = pb.data.current_batch if pb.data is not None else None
+        for _ in tf.range(n):
+            with tf.GradientTape() as tape:
+                total_loss = tf.constant(0.0, dtype=tf.float64)
+                for loss in pb.train_losses:
+                    total_loss = total_loss + loss(data)
+
+            grads = tape.gradient(total_loss, trainable_vars)
+            grads_and_vars = [
+                (g, v) for g, v in zip(grads, trainable_vars) if g is not None
+            ]
+            optimizer.apply_gradients(grads_and_vars)
+        # Return last-step loss values for logging
+        loss_vals = [loss(data) for loss in pb.train_losses]
         return total_loss, loss_vals
 
     has_callbacks = len(pb.callbacks) > 0
 
-    for epoch in range(num_epochs):
+    epoch = 0
+    while epoch < num_epochs:
         if uses_minibatch:
             pb.data.advance()
 
-        total_loss, loss_vals = train_step()
+        remaining = num_epochs - epoch
+        n = min(steps_per_call, remaining)
+        total_loss, loss_vals = train_n_steps(tf.constant(n, dtype=tf.int32))
+        epoch += n
 
-        # Log train losses (every 100 steps to avoid GPU sync stalls)
-        if epoch % 100 == 0:
+        # Log train losses
+        if epoch % log_frequency == 0:
             for loss, val in zip(pb.train_losses, loss_vals):
                 pb.history['losses'][loss.name]['log'].append(
                     float(val.numpy())

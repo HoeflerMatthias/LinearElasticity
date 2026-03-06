@@ -180,6 +180,7 @@ class PINNTrainHandler:
 
                         loss.lagrange_mul.assign(lambda_new + lambda_0)
 
+        callback.frequency = frequency
         return callback
 
     @staticmethod
@@ -209,6 +210,7 @@ class PINNTrainHandler:
                         loss.weight.assign(alpha * norm_sum / gradient_norm + (1 - alpha) * loss.weight)
                         pb.history['weights'][loss.name]['log'].append(loss.weight.numpy().item())
 
+        callback.frequency = frequency
         return callback
 
     @staticmethod
