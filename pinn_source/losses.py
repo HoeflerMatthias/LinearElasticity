@@ -175,22 +175,6 @@ class PINNLossHandler:
         for phase in phases:
             self.train_losses[phase] += [loss]
 
-    def setup_box_constraints(self, model, dataset, weight: float, identifier: str = 'box', lower_bound=None, upper_bound=None):
-
-        _,_, num_batched = dataset.get_data('x_prior', 'reg', 'train')
-
-        if lower_bound is not None and weight > 0.:
-            min_loss_func = lambda data: tf.nn.relu(-model(data['x_prior']) + lower_bound)
-            min_loss = ns.LossMeanSquares(identifier + '_min', min_loss_func, weight = weight, expected_shape=(num_batched, 1))
-
-            self.train_losses['main'] += [min_loss]
-
-        if upper_bound is not None and weight > 0.:
-            max_loss_func = lambda data: tf.nn.relu(model(data['x_prior']) - upper_bound)
-            max_loss = ns.LossMeanSquares(identifier + '_max', max_loss_func, weight=weight, expected_shape=(num_batched, 1))
-
-            self.train_losses['main'] += [max_loss]
-
     def setup_dice_loss(self, model, dataset, threshold, identifier: str = 'dice'):
 
         b_0 = tf.constant(0, dtype=tf.double)

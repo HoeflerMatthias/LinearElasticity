@@ -3,8 +3,6 @@
       "mu": {
           "sigmoid_scalings": [1.0, 30.0],
           "initial_factor": 1.5,
-          "min_factor": 0.5,
-          "max_factor": 2.0,
           "threshold": 0.5,
           "max_value": 10.0,
           "net": {
@@ -64,7 +62,6 @@
   "wFit": 1e6,
   "wBCN": 1e2,
   "wT": 1e-7,
-  "wM": 0.0,
 
   "seed": 0,
 

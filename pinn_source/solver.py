@@ -133,8 +133,6 @@ def run(args):
     # Region mu values (sorted ascending) from auto-detected regions
     region_mu_values = sorted(data_handler.tag_dict.values())
     num_regions = len(region_mu_values)
-    region_mu_min = region_mu_values[0]
-    region_mu_max = region_mu_values[-1]
 
     # Network definition
     #####################
@@ -238,13 +236,6 @@ def run(args):
 
     # total error test loss
     loss_handler.setup_relative_error_loss(param_lambda, dataset, identifier=inverse_param + '_error')
-
-    # box constraints
-    lower_bound = region_mu_min * config['min_factor']
-    upper_bound = region_mu_max * config['max_factor']
-
-    loss_handler.setup_box_constraints(param_lambda, dataset, params['wM'], identifier=inverse_param,
-                                       lower_bound=lower_bound, upper_bound=upper_bound)
 
     # weight decay regularization
     if config['net']['wT'] > 0.0:
