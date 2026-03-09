@@ -1,3 +1,4 @@
+import os
 import tempfile
 
 from firedrake import CheckpointFile
@@ -30,6 +31,7 @@ def log_fem_artifacts(result):
     _log_history_metrics(result.metrics)
     if result.solution_file:
         mlflow.log_artifact(result.solution_file)
+        os.unlink(result.solution_file)
 
 
 def log_result_to_mlflow(result):

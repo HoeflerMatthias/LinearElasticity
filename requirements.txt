@@ -1,3 +1,5 @@
 numpy
 matplotlib
-mlflow==3.9.0
+mlflow-skinny==3.9.0
+pyyaml
+ray[tune]

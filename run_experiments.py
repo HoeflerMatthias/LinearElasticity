@@ -6,13 +6,16 @@ Usage:
     python run_experiments.py reduced
 """
 import os
+import shutil
 import sys
+import tempfile
 
 from ray import tune
 
 os.environ["RAY_CHDIR_TO_TRIAL_DIR"] = "0"
 
-MAX_WORKERS = int(os.environ.get("MAX_WORKERS", 4))
+MAX_WORKERS = int(os.environ.get("MAX_WORKERS", 64))
+CPUS_PER_TRIAL = int(os.environ.get("CPUS_PER_TRIAL", 2))
 
 SOLVERS = {
     "lsfem": "lin_elast:lsfem",
@@ -24,6 +27,8 @@ SOLVERS = {
 # ── Objective ─────────────────────────────────────────────────────────────── #
 
 def objective(config):
+    os.environ["OMP_NUM_THREADS"] = str(CPUS_PER_TRIAL)
+
     solver_name = config.pop("_solver")
     experiment_name = SOLVERS[solver_name]
 
@@ -121,28 +126,27 @@ if __name__ == "__main__":
     solver_name = sys.argv[1]
     spaces = SEARCH_SPACES[solver_name]()
 
-    objective_cpu = tune.with_resources(objective, {"cpu": 1})
+    objective_cpu = tune.with_resources(objective, {"cpu": CPUS_PER_TRIAL})
+    ray_storage = tempfile.mkdtemp(prefix="ray_fem_")
 
-    # KKT returns a list of spaces (one per regularisation type)
-    if isinstance(spaces, list):
-        for i, space in enumerate(spaces):
-            print(f"--- KKT sweep {i+1}/{len(spaces)} ---")
-            tuner = tune.Tuner(
-                objective_cpu,
-                tune_config=tune.TuneConfig(
-                    num_samples=1,
-                    max_concurrent_trials=MAX_WORKERS,
-                ),
-                param_space=space,
-            )
-            tuner.fit()
-    else:
+    def run_tuner(param_space):
         tuner = tune.Tuner(
             objective_cpu,
             tune_config=tune.TuneConfig(
                 num_samples=1,
                 max_concurrent_trials=MAX_WORKERS,
             ),
-            param_space=spaces,
+            param_space=param_space,
+            run_config=tune.RunConfig(storage_path=ray_storage),
         )
         tuner.fit()
+
+    # KKT returns a list of spaces (one per regularisation type)
+    if isinstance(spaces, list):
+        for i, space in enumerate(spaces):
+            print(f"--- KKT sweep {i+1}/{len(spaces)} ---")
+            run_tuner(space)
+    else:
+        run_tuner(spaces)
+
+    shutil.rmtree(ray_storage, ignore_errors=True)

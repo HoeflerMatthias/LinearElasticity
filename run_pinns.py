@@ -7,6 +7,8 @@ Ray Tune handles GPU assignment and trial concurrency.
 """
 
 import os
+import shutil
+import tempfile
 
 from ray import tune
 
@@ -60,6 +62,7 @@ if __name__ == "__main__":
 
     gpu_fraction = 0.5  # trials per GPU = 1/fraction
     objective_gpu = tune.with_resources(objective, {"gpu": gpu_fraction})
+    ray_storage = tempfile.mkdtemp(prefix="ray_pinns_")
 
     tuner = tune.Tuner(
         objective_gpu,
@@ -68,5 +71,8 @@ if __name__ == "__main__":
             max_concurrent_trials=8,  # 4 GPUs × 2 trials/GPU
         ),
         param_space=search_space,
+        run_config=tune.RunConfig(storage_path=ray_storage),
     )
     tuner.fit()
+
+    shutil.rmtree(ray_storage, ignore_errors=True)
