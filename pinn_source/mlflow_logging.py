@@ -73,4 +73,7 @@ def log_pinns_to_mlflow(params, filename, loss_handler, train_handler,
         # -- Artifacts: post-processing outputs -------------------------- #
         for d in (artifact_dirs or []):
             if os.path.isdir(d):
-                mlflow.log_artifacts(d, artifact_path=os.path.basename(d))
+                for f in os.listdir(d):
+                    if filename in f:
+                        mlflow.log_artifact(os.path.join(d, f),
+                                            artifact_path=os.path.basename(d))
