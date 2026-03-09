@@ -17,7 +17,7 @@ def get_param_function(min_val, max_val, a=1.0):
 #############################################################################
 # Main loop
 #############################################################################
-def run(args):
+def run_solver(params, filename):
     import numpy as np
     from pinn_source.network import load_network, get_network
     from pinn_source.data_handler import FEMDataHandler
@@ -29,9 +29,6 @@ def run(args):
     import pinn_source.constitutive
     import random
     import os
-
-    params = args[0]
-    filename = args[1]
     
     # Set seeds for reproducibility
     np.random.seed(params['seed'])
@@ -402,24 +399,25 @@ def run(args):
         save_plots(data_handler, model, param_lambda, filename, params, plot_solution=True)
 
     #############################################################################
-    # MLflow logging
+    # Return result for ExperimentRunner
     #############################################################################
-    mlflow_uri = os.environ.get("MLFLOW_TRACKING_URI")
-    if mlflow_uri:
-        import mlflow
-        from pinn_source.mlflow_logging import log_pinns_to_mlflow
+    base = params['program']['base_dir']
+    artifact_dirs = [
+        os.path.join(base, params['program'][key])
+        for key in ['solution_dir', 'solution_field_dir',
+                    'solution_weight_dir', 'model_dir']
+        if key in params['program']
+    ]
 
-        mlflow.set_tracking_uri(mlflow_uri)
-        mlflow.set_experiment(os.environ.get("MLFLOW_EXPERIMENT", "lin_elast:pinns"))
+    return {
+        'loss_handler': loss_handler,
+        'train_handler': train_handler,
+        'timings': timings,
+        'artifact_dirs': artifact_dirs,
+        'filename': filename,
+    }
 
-        # Collect post-processing output directories to log as artifacts
-        base = params['program']['base_dir']
-        artifact_dirs = [
-            os.path.join(base, params['program'][key])
-            for key in ['solution_dir', 'solution_field_dir',
-                        'solution_weight_dir', 'model_dir']
-            if key in params['program']
-        ]
 
-        log_pinns_to_mlflow(params, filename, loss_handler, train_handler,
-                            artifact_dirs=artifact_dirs, timings=timings)
+def run(args):
+    """Backward-compatible wrapper for run_solver."""
+    return run_solver(args[0], args[1])

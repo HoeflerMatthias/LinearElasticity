@@ -120,13 +120,15 @@ class OptimizationProblem:
         self.data = data
 
         # ---- history ---------------------------------------------------- #
-        self.history = {'losses': {}}
+        self.history = {'losses': {}, 'transitions': []}
+        self.iteration_offset = 0  # cumulative offset across optimizer phases
         for loss in self.train_losses:
             if loss.name not in self.history['losses']:
-                self.history['losses'][loss.name] = {'log': []}
+                self.history['losses'][loss.name] = {'log': [], 'iter': []}
         for loss in self.test_losses:
-            if loss.name not in self.history['losses']:
-                self.history['losses'][loss.name] = {'log': []}
+            key = f"test/{loss.name}"
+            if key not in self.history['losses']:
+                self.history['losses'][key] = {'log': [], 'iter': []}
 
     def compile(self, optimizers=None):
         """Placeholder for compatibility — no tf.function tracing."""
@@ -173,6 +175,7 @@ def minimize(pb, method, optimizer_or_name, num_epochs=1000, verbose=True):
 # --------------------------------------------------------------------------- #
 
 def _minimize_keras(pb, optimizer, num_epochs, log_frequency=100):
+    pb.history['transitions'].append({'iter': pb.iteration_offset, 'method': 'Adam'})
     trainable_vars = pb.variables
     uses_minibatch = (pb.data is not None
                       and any(ds.batch_size is not None for ds in pb.data.datasets))
@@ -224,10 +227,18 @@ def _minimize_keras(pb, optimizer, num_epochs, log_frequency=100):
 
         # Log train losses
         if epoch % log_frequency == 0:
+            global_itr = pb.iteration_offset + epoch
             for loss, val in zip(pb.train_losses, loss_vals):
                 pb.history['losses'][loss.name]['log'].append(
                     float(val.numpy())
                 )
+                pb.history['losses'][loss.name]['iter'].append(global_itr)
+            for loss in pb.test_losses:
+                key = f"test/{loss.name}"
+                pb.history['losses'][key]['log'].append(
+                    float(loss.loss_base_call().numpy())
+                )
+                pb.history['losses'][key]['iter'].append(global_itr)
             if pb._verbose:
                 print(f"  Adam  {epoch:>6d}/{num_epochs}  loss={total_loss.numpy():.6e}")
 
@@ -236,12 +247,15 @@ def _minimize_keras(pb, optimizer, num_epochs, log_frequency=100):
             for cb in pb.callbacks:
                 cb(pb, epoch, epoch)
 
+    pb.iteration_offset += num_epochs
+
 
 # --------------------------------------------------------------------------- #
 # SciPy L-BFGS-B
 # --------------------------------------------------------------------------- #
 
 def _minimize_scipy(pb, method_name, num_epochs):
+    pb.history['transitions'].append({'iter': pb.iteration_offset, 'method': 'L-BFGS'})
     stitcher = VariablesStitcher(pb.variables)
 
     # Full-batch data (set_batch_size(None) called before BFGS)
@@ -270,13 +284,21 @@ def _minimize_scipy(pb, method_name, num_epochs):
         for cb in pb.callbacks:
             cb(pb, itr[0], itr[0])
 
-        # Log train losses (every 100 steps to reduce overhead)
+        # Log train + test losses (every 100 steps to reduce overhead)
         if itr[0] % 100 == 0:
+            global_itr = pb.iteration_offset + itr[0]
             total = 0.0
             for loss in pb.train_losses:
                 val = float(loss(data).numpy())
                 pb.history['losses'][loss.name]['log'].append(val)
+                pb.history['losses'][loss.name]['iter'].append(global_itr)
                 total += val
+            for loss in pb.test_losses:
+                key = f"test/{loss.name}"
+                pb.history['losses'][key]['log'].append(
+                    float(loss.loss_base_call().numpy())
+                )
+                pb.history['losses'][key]['iter'].append(global_itr)
             if pb._verbose:
                 print(f"  BFGS  {itr[0]:>6d}/{num_epochs}  loss={total:.6e}")
 
@@ -297,6 +319,7 @@ def _minimize_scipy(pb, method_name, num_epochs):
     )
 
     stitcher.set_values(result.x)
+    pb.iteration_offset += itr[0]
     if pb._verbose:
         print(f"  BFGS  done  ({result.message.decode() if isinstance(result.message, bytes) else result.message})")
 
@@ -306,6 +329,7 @@ def _minimize_scipy(pb, method_name, num_epochs):
 # --------------------------------------------------------------------------- #
 
 def _minimize_tfp_lbfgs(pb, num_epochs):
+    pb.history['transitions'].append({'iter': pb.iteration_offset, 'method': 'L-BFGS'})
     import tensorflow_probability as tfp
 
     stitcher = VariablesStitcher(pb.variables)
@@ -359,17 +383,28 @@ def _minimize_tfp_lbfgs(pb, num_epochs):
     # Assign final values back
     stitcher.set_values_tf(result.position)
 
-    # Log final losses
+    num_itr = int(result.num_iterations.numpy())
+
+    # Log final train + test losses
+    global_itr = pb.iteration_offset + num_itr
     for loss in pb.train_losses:
         val = loss(data)
         pb.history['losses'][loss.name]['log'].append(float(val.numpy()))
+        pb.history['losses'][loss.name]['iter'].append(global_itr)
+    for loss in pb.test_losses:
+        key = f"test/{loss.name}"
+        pb.history['losses'][key]['log'].append(
+            float(loss.loss_base_call().numpy())
+        )
+        pb.history['losses'][key]['iter'].append(global_itr)
+
+    pb.iteration_offset += num_itr
 
     # Run callbacks at completion
     for cb in pb.callbacks:
         cb(pb, num_epochs, num_epochs)
 
     converged = bool(result.converged.numpy())
-    num_itr = int(result.num_iterations.numpy())
     final_loss = float(result.objective_value.numpy())
     if pb._verbose:
         print(f"  TFP-BFGS  done  iterations={num_itr}  loss={final_loss:.6e}  converged={converged}")

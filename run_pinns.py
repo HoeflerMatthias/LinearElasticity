@@ -5,7 +5,7 @@ from pinn_source.run import setup_trial
 
 if __name__ == '__main__':
 
-    setup_file = 'pinn_source/config.json'
+    setup_file = 'pinn_source/config.yaml'
 
     #############################################################################
     # Directories and file structure
@@ -41,6 +41,6 @@ if __name__ == '__main__':
     #############################################################################
     # Run
     #############################################################################
-    from pinn_source.solver import run
+    from pinn_source.solver import run_solver
 
-    setup_trial(run, setup_file, config, seeds, keylist)
+    setup_trial(run_solver, setup_file, config, seeds, keylist)

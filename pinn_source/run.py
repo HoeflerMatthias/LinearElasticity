@@ -3,10 +3,12 @@
 # %%
 
 import multiprocessing
-import json
 import itertools
 import copy
 import os
+
+from pinn_source.utils.file_utils import load_config
+
 
 #############################################################################
 # File utilities
@@ -85,8 +87,7 @@ def replace_item(obj, keylist, replace_value):
 #############################################################################
 
 def _build_paramlist(setup_file, config, seeds, keylist, extract_params_from_setup=False):
-    with open(setup_file, 'r') as f:
-        setup = json.load(f)
+    setup = load_config(setup_file)
 
     if extract_params_from_setup:
         setup = setup['parameter']
@@ -129,17 +130,59 @@ def _detect_gpus():
 
 def _gpu_worker(args):
     """Worker that sets CUDA_VISIBLE_DEVICES before importing TF."""
-    gpu_id, run_module, run_func_name, arg = args
+    gpu_id, run_module, run_func_name, params, keylist, experiment_name = args
     os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
 
     import importlib
     mod = importlib.import_module(run_module)
     runfunc = getattr(mod, run_func_name)
-    runfunc(arg)
+    _run_single(runfunc, params, keylist, experiment_name)
+
+
+def _make_algorithm_fn(solver_run, keylist):
+    """Create an algorithm_fn(params, seed) for ExperimentRunner."""
+    def algorithm_fn(params, seed):
+        filename = params_to_filename(params, keylist)
+        return solver_run(params, filename)
+    return algorithm_fn
+
+
+def _make_post_run_fn():
+    """Create a post_run_fn(result) that logs PINNs artifacts."""
+    def post_run_fn(result):
+        from pinn_source.mlflow_logging import log_pinns_artifacts
+        log_pinns_artifacts(
+            filename=result['filename'],
+            loss_handler=result['loss_handler'],
+            train_handler=result['train_handler'],
+            artifact_dirs=result.get('artifact_dirs'),
+            timings=result.get('timings'),
+        )
+    return post_run_fn
+
+
+def _run_single(solver_run, params, keylist, experiment_name):
+    """Run a single parameter set, with ExperimentRunner if MLflow is available."""
+    seed = params['seed']
+
+    if os.environ.get("MLFLOW_TRACKING_URI"):
+        from pinn_source.experiment_runner import ExperimentRunner
+
+        runner = ExperimentRunner(
+            params=params,
+            algorithm_fn=_make_algorithm_fn(solver_run, keylist),
+            experiment_name=experiment_name,
+            post_run_fn=_make_post_run_fn(),
+        )
+        runner.run(seed)
+    else:
+        filename = params_to_filename(params, keylist)
+        solver_run(params, filename)
 
 
 def setup_trial(runfunc, setup_file, config, seeds, keylist,
-                exception_handling=False, extract_params_from_setup=False):
+                exception_handling=False, extract_params_from_setup=False,
+                experiment_name="lin_elast:pinns"):
     """Build parameter combinations and run them.
 
     Auto-detects available GPUs. With multiple GPUs and multiple runs,
@@ -152,24 +195,26 @@ def setup_trial(runfunc, setup_file, config, seeds, keylist,
     gpus = _detect_gpus()
 
     if len(gpus) > 1 and len(paramlist) > 1:
-        _run_multi_gpu(runfunc, paramlist, gpus, exception_handling)
+        _run_multi_gpu(runfunc, paramlist, gpus, exception_handling,
+                       keylist, experiment_name)
     else:
-        for arg in paramlist:
+        for params, filename in paramlist:
             if exception_handling:
                 try:
-                    runfunc(arg)
+                    _run_single(runfunc, params, keylist, experiment_name)
                 except Exception as inst:
                     print(type(inst))
                     print(inst.args)
                     print(inst)
-                    print("error for ", arg)
+                    print("error for ", filename)
             else:
-                runfunc(arg)
+                _run_single(runfunc, params, keylist, experiment_name)
 
     return paramlist
 
 
-def _run_multi_gpu(runfunc, paramlist, gpus, exception_handling):
+def _run_multi_gpu(runfunc, paramlist, gpus, exception_handling,
+                   keylist, experiment_name):
     """Distribute runs across GPUs using a process pool with spawn context."""
     import concurrent.futures
 
@@ -186,11 +231,12 @@ def _run_multi_gpu(runfunc, paramlist, gpus, exception_handling):
         futures = {}
         gpu_cycle = itertools.cycle(gpus)
 
-        for arg in paramlist:
+        for params, filename in paramlist:
             gpu_id = next(gpu_cycle)
-            worker_args = (gpu_id, run_module, run_func_name, arg)
+            worker_args = (gpu_id, run_module, run_func_name,
+                           params, keylist, experiment_name)
             future = executor.submit(_gpu_worker, worker_args)
-            futures[future] = (gpu_id, arg[1])
+            futures[future] = (gpu_id, filename)
 
         for future in concurrent.futures.as_completed(futures):
             gpu_id, filename = futures[future]

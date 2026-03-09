@@ -53,21 +53,49 @@ class HistoryPlotCallback:
         import matplotlib
         matplotlib.use('Agg')
         import matplotlib.pyplot as plt
+        from matplotlib.ticker import LogLocator, NullFormatter
 
         os.makedirs(os.path.dirname(self.filename), exist_ok=True)
 
-        fig, ax = plt.subplots(figsize=(10, 6))
+        fig, (ax_train, ax_test) = plt.subplots(1, 2, figsize=(14, 5),
+                                                 sharey=True)
+        ax_train.set_title('Training')
+        ax_test.set_title('Test')
 
+        # Separate train vs test losses
         for name, entry in pb.history.get('losses', {}).items():
             vals = entry.get('log', [])
-            if vals:
-                ax.semilogy(vals, label=name, linewidth=0.8)
+            iters = entry.get('iter', [])
+            if not vals:
+                continue
+            x = iters if len(iters) == len(vals) else list(range(len(vals)))
+            is_test = name.startswith('test/')
+            label = name.removeprefix('test/') if is_test else name
+            ax = ax_test if is_test else ax_train
+            ax.plot(x, vals, label=label, linewidth=0.9)
 
-        ax.set_xlabel('Iteration')
-        ax.set_ylabel('Loss')
-        ax.legend(loc='upper right', fontsize=7, ncol=2)
-        ax.set_title('Loss History')
+        # Optimizer transition lines
+        transitions = pb.history.get('transitions', [])
+        for ax in (ax_train, ax_test):
+            for t in transitions:
+                it = t['iter']
+                if it > 0:
+                    ax.axvline(it, color='grey', linewidth=0.6,
+                               linestyle=':', alpha=0.8)
+                    ax.text(it, 1.02, t['method'], transform=ax.get_xaxis_transform(),
+                            ha='left', va='bottom', fontsize=6, color='grey')
 
+        # Log-log scales and formatting
+        for ax in (ax_train, ax_test):
+            ax.set_xscale('log')
+            ax.set_yscale('log')
+            ax.set_xlabel('Iteration')
+            ax.legend(loc='upper right', fontsize=7, ncol=1)
+            ax.grid(True, which='major', linewidth=0.4, alpha=0.5)
+            ax.grid(True, which='minor', linewidth=0.2, alpha=0.3)
+        ax_train.set_ylabel('Loss')
+
+        fig.suptitle('Loss History', fontsize=12)
         plt.tight_layout()
         plt.savefig(self.filename, dpi=150)
         plt.close(fig)
