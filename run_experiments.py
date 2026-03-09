@@ -16,6 +16,7 @@ os.environ["RAY_CHDIR_TO_TRIAL_DIR"] = "0"
 os.environ["OMP_NUM_THREADS"] = "1"
 
 MAX_WORKERS = int(os.environ.get("MAX_WORKERS", 64))
+MPI_PROCS = int(os.environ.get("MPI_PROCS", 1))
 
 SOLVERS = {
     "lsfem": "lin_elast:lsfem",
@@ -37,8 +38,12 @@ def objective(config):
     solver_module = f"fem_source.{solver_name}"
 
     def algorithm_fn(params, seed):
-        mod = importlib.import_module(solver_module)
-        result = mod.invscar(**params)
+        if MPI_PROCS > 1:
+            from fem_source.io import run_solver_mpi
+            result = run_solver_mpi(solver_name, params, MPI_PROCS)
+        else:
+            mod = importlib.import_module(solver_module)
+            result = mod.invscar(**params)
         # Flatten scalar metrics for ExperimentRunner logging
         metrics = {}
         for k, v in result.metrics.items():
@@ -124,7 +129,7 @@ if __name__ == "__main__":
     solver_name = sys.argv[1]
     spaces = SEARCH_SPACES[solver_name]()
 
-    objective_cpu = tune.with_resources(objective, {"cpu": 1})
+    objective_cpu = tune.with_resources(objective, {"cpu": max(MPI_PROCS, 1)})
     ray_storage = tempfile.mkdtemp(prefix="ray_fem_")
 
     def run_tuner(param_space):

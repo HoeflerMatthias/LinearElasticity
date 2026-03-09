@@ -1,7 +1,12 @@
+import json
 import os
+import subprocess
+import sys
 import tempfile
 
 from firedrake import CheckpointFile
+
+from .common import InvScarResult
 
 
 def save_solution_checkpoint(u, alpha):
@@ -27,6 +32,13 @@ def log_fem_artifacts(result):
     _log_history_metrics(result.metrics)
     if result.solution_file:
         mlflow.log_artifact(result.solution_file)
+        try:
+            from .plotting import plot_alpha_slice
+            png_path = plot_alpha_slice(result.solution_file)
+            mlflow.log_artifact(png_path)
+            os.unlink(png_path)
+        except Exception as e:
+            print(f"[warning] Alpha plot failed: {e}")
         os.unlink(result.solution_file)
 
 
@@ -74,3 +86,33 @@ def _log_history_metrics(metrics, batch_size=500):
 
     for i in range(0, len(batch), batch_size):
         client.log_batch(run_id, metrics=batch[i:i + batch_size])
+
+
+def run_solver_mpi(solver_name, params, nprocs):
+    """Run a FEM solver under mpirun and return an InvScarResult."""
+    input_fd, input_path = tempfile.mkstemp(suffix=".json", prefix="fem_in_")
+    output_path = input_path.replace(".json", "_out.json")
+
+    try:
+        with os.fdopen(input_fd, "w") as f:
+            json.dump(params, f)
+
+        subprocess.run(
+            ["mpirun", "--oversubscribe", "-np", str(nprocs),
+             sys.executable, "-m", "fem_source.mpi_worker",
+             input_path, solver_name, output_path],
+            check=True,
+        )
+
+        with open(output_path) as f:
+            data = json.load(f)
+
+        return InvScarResult(
+            params=data["params"],
+            metrics=data["metrics"],
+            solution_file=data["solution_file"],
+        )
+    finally:
+        for p in (input_path, output_path):
+            if os.path.exists(p):
+                os.unlink(p)
