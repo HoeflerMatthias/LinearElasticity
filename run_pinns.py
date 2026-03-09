@@ -21,6 +21,11 @@ SEEDS = [1, 2, 3]
 # ── Objective ─────────────────────────────────────────────────────────────── #
 
 def objective(config):
+    # Allow multiple trials to share a GPU without OOM
+    import tensorflow as tf
+    for gpu in tf.config.list_physical_devices("GPU"):
+        tf.config.experimental.set_memory_growth(gpu, True)
+
     from pinn_source.utils.file_utils import load_config
     from pinn_source.experiment_runner import ExperimentRunner
     from pinn_source.run import apply_overrides, make_algorithm_fn, make_post_run_fn
@@ -53,13 +58,14 @@ if __name__ == "__main__":
         "wBCN": tune.grid_search([1e3, 1e4]),
     }
 
-    objective_gpu = tune.with_resources(objective, {"gpu": 1})
+    gpu_fraction = 0.5  # trials per GPU = 1/fraction
+    objective_gpu = tune.with_resources(objective, {"gpu": gpu_fraction})
 
     tuner = tune.Tuner(
         objective_gpu,
         tune_config=tune.TuneConfig(
             num_samples=1,
-            max_concurrent_trials=4,
+            max_concurrent_trials=8,  # 4 GPUs × 2 trials/GPU
         ),
         param_space=search_space,
     )
