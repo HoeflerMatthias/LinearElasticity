@@ -28,6 +28,7 @@ class ExperimentRunner:
         self.algorithm_fn = algorithm_fn
         self.post_run_fn = post_run_fn
         self.seed = None
+        self.results = []
         self.hash_exclude_keys = hash_exclude_keys or ["program", "seed"]
 
         self.experiment_name = experiment_name
@@ -78,7 +79,9 @@ class ExperimentRunner:
                     self.post_run_fn(result)
 
                 if isinstance(result, dict):
-                    log_metrics_safely(result.get("metrics", {}))
+                    metrics = result.get("metrics", {})
+                    log_metrics_safely(metrics)
+                    self.results.append(metrics)
 
                 mlflow.set_tag("status", "complete")
 
