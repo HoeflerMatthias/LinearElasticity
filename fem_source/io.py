@@ -97,12 +97,18 @@ def run_solver_mpi(solver_name, params, nprocs):
         with os.fdopen(input_fd, "w") as f:
             json.dump(params, f)
 
-        subprocess.run(
+        proc = subprocess.run(
             ["mpirun", "--oversubscribe", "-np", str(nprocs),
              sys.executable, "-m", "fem_source.mpi_worker",
              input_path, solver_name, output_path],
-            check=True,
+            capture_output=True, text=True,
         )
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"MPI solver failed (exit {proc.returncode}):\n"
+                f"stdout: {proc.stdout[-2000:]}\n"
+                f"stderr: {proc.stderr[-2000:]}"
+            )
 
         with open(output_path) as f:
             data = json.load(f)
