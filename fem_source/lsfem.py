@@ -261,7 +261,7 @@ def invscar(**params):
         'wall_time': wall_time,
     }
 
-    solution_file = save_solution_checkpoint(u_ifun, alpha_ifun, u_true=u_t, alpha_true=alpha_t)
+    solution_file = save_solution_checkpoint(u_ifun, alpha_ifun)
 
     return InvScarResult(
         params=used_params,

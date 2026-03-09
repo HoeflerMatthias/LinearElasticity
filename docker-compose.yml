@@ -18,6 +18,8 @@ services:
       - .:/app
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    shm_size: 128gb
+    cpus: 128
     environment:
       - MLFLOW_TRACKING_URI=http://host.docker.internal:8080
 

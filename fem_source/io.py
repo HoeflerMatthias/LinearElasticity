@@ -4,18 +4,14 @@ import tempfile
 from firedrake import CheckpointFile
 
 
-def save_solution_checkpoint(u, alpha, u_true=None, alpha_true=None):
-    """Save solution to a temp HDF5 file. Returns the file path."""
+def save_solution_checkpoint(u, alpha):
+    """Save computed solution to a temp HDF5 file. Returns the file path."""
     tmp = tempfile.NamedTemporaryFile(suffix='.h5', delete=False)
     tmp.close()
     with CheckpointFile(tmp.name, "w") as chk:
         chk.save_mesh(u.function_space().mesh())
         chk.save_function(u, name="u")
         chk.save_function(alpha, name="alpha")
-        if u_true is not None:
-            chk.save_function(u_true, name="u_true")
-        if alpha_true is not None:
-            chk.save_function(alpha_true, name="alpha_true")
     return tmp.name
 
 
