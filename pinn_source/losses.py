@@ -204,6 +204,9 @@ class PINNLossHandler:
 
     def setup_relative_region_error_losses(self, model, dataset, identifier: str = 'error'):
 
+        def _make_region_loss_func(m, rm, rv):
+            return lambda: (m(rm) - rv) / rv
+
         losses = []
         for tag in dataset.data_handler.tag_dict:
             region_mesh, _, region_values = dataset.data_handler.get_mesh_points_for_tag(tag)
@@ -212,7 +215,7 @@ class PINNLossHandler:
 
             losses += [
                 ns.LossMeanSquares(name + '_' + identifier,
-                                   lambda rm=region_mesh, rv=region_values: (model(rm) - rv) / rv)
+                                   _make_region_loss_func(model, region_mesh, region_values))
             ]
 
         self.test_losses['main'] += losses

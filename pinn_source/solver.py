@@ -401,20 +401,11 @@ def run_solver(params, filename):
     #############################################################################
     # Return result for ExperimentRunner
     #############################################################################
-    base = params['program']['base_dir']
-    artifact_dirs = [
-        os.path.join(base, params['program'][key])
-        for key in ['solution_dir', 'solution_field_dir',
-                    'solution_weight_dir', 'model_dir']
-        if key in params['program']
-    ]
-
     return {
         'loss_handler': loss_handler,
         'train_handler': train_handler,
         'timings': timings,
-        'artifact_dirs': artifact_dirs,
-        'base_dir': base,
+        'base_dir': params['program']['base_dir'],
     }
 
 

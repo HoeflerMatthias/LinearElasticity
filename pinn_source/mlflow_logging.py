@@ -8,7 +8,7 @@ import os
 
 
 def log_pinns_artifacts(loss_handler, train_handler,
-                        artifact_dirs=None, timings=None):
+                        base_dir=None, timings=None):
     """Log PINNs-specific metrics and artifacts to the active MLflow run.
 
     Parameters
@@ -17,8 +17,8 @@ def log_pinns_artifacts(loss_handler, train_handler,
         Has test_losses with capturable final metrics.
     train_handler : PINNTrainHandler
         Has filenames dict pointing to saved history/plot files.
-    artifact_dirs : list[str] or None
-        Directories whose contents are logged as artifacts.
+    base_dir : str or None
+        Run output directory; all files are logged recursively as artifacts.
     timings : dict[str, float] or None
         Per-phase wall times in seconds (keys: 'fit', 'physics', 'main').
     """
@@ -46,18 +46,9 @@ def log_pinns_artifacts(loss_handler, train_handler,
         if json_path and os.path.isfile(json_path):
             _log_loss_trajectories(json_path, phase)
 
-    # -- Artifacts: history JSON and plot files ------------------------------ #
-    for phase, paths in train_handler.filenames.items():
-        for kind, path in paths.items():
-            if path and os.path.isfile(path):
-                mlflow.log_artifact(path, artifact_path=f"{phase}/{kind}")
-
-    # -- Artifacts: post-processing outputs --------------------------------- #
-    for d in (artifact_dirs or []):
-        if os.path.isdir(d):
-            for f in os.listdir(d):
-                mlflow.log_artifact(os.path.join(d, f),
-                                    artifact_path=os.path.basename(d))
+    # -- Artifacts: entire run directory (recursively) ---------------------- #
+    if base_dir and os.path.isdir(base_dir):
+        mlflow.log_artifacts(base_dir)
 
 
 def _log_loss_trajectories(json_path, phase, batch_size=500):

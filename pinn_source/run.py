@@ -165,7 +165,7 @@ def _make_post_run_fn():
         log_pinns_artifacts(
             loss_handler=result['loss_handler'],
             train_handler=result['train_handler'],
-            artifact_dirs=result.get('artifact_dirs'),
+            base_dir=result.get('base_dir'),
             timings=result.get('timings'),
         )
         # Clean up temporary run directory
