@@ -117,12 +117,12 @@ class DataPlotter:
         axs = [ax1, ax2, ax3]
         titles = ["Data Source", "PINN Solution", "Error"]
 
-        scat1 = ax1.scatter(x_displaced[0][:, 0], x_displaced[0][:, 1], x_displaced[0][:, 2], c=cmap_plot(norm_orig(c_data[0])), cmap=cmap_plot,
-                            s=5, vmin = v[0][0], vmax = v[0][1])
-        scat2 = ax2.scatter(x_displaced_model[0, :, 0], x_displaced_model[0, :, 1], x_displaced_model[0, :, 2], c=cmap_plot(norm_orig(c_model[0])), cmap=cmap_plot,
-                            s=5, vmin = v[1][0], vmax = v[1][1])
-        scat3 = ax3.scatter(x_displaced[0][:, 0], x_displaced[0][:, 1], x_displaced[0][:, 2], c=cmap_error(norm_error(c_error[0])), cmap=cmap_error,
-                            s=5, vmin = v[2][0], vmax = v[2][1])
+        scat1 = ax1.scatter(x_displaced[0][:, 0], x_displaced[0][:, 1], x_displaced[0][:, 2], c=c_data[0], cmap=cmap_plot,
+                            s=5, vmin=v[0][0], vmax=v[0][1])
+        scat2 = ax2.scatter(x_displaced_model[0, :, 0], x_displaced_model[0, :, 1], x_displaced_model[0, :, 2], c=c_model[0], cmap=cmap_plot,
+                            s=5, vmin=v[1][0], vmax=v[1][1])
+        scat3 = ax3.scatter(x_displaced[0][:, 0], x_displaced[0][:, 1], x_displaced[0][:, 2], c=c_error[0], cmap=cmap_error,
+                            s=5, vmin=v[2][0], vmax=v[2][1])
         scatters = [scat1, scat2, scat3]
 
         t = t0
@@ -154,14 +154,11 @@ class DataPlotter:
         cbar.ax.set_yticklabels(ticks_error_labels)
 
         iterations = math.ceil((tcount)/step_size)
-        print("Animation: %d of %d" % (0, iterations))
-
+        print(f"[animate_error_plot] starting ({iterations} frames) -> {filename}")
 
         def animate_scatters(iteration, scatters):
             n = (iteration)*step_size
             t = tvalues[n]
-
-            print("Animation: %d of %d" % (iteration, iterations+1))
 
             scatters[0]._offsets3d = (x_displaced[n][:,0], x_displaced[n][:,1], x_displaced[n][:,2])
 
@@ -174,6 +171,7 @@ class DataPlotter:
 
         ani.save(filename, writer='pillow', fps=math.ceil(iterations/10), dpi=dpi)
         plt.close(fig)
+        print(f"[animate_error_plot] done -> {filename}")
 
     def plot_weights(self, data_handler, hloss, x, filename = "weights.png", fig = None):
 
@@ -282,7 +280,7 @@ class DataPlotter:
         ]
 
         # plotting
-        fig,axs = plt.subplots(figsize=(8, 4), ncols=3, nrows=1, subplot_kw={'projection': '3d'})
+        fig,axs = plt.subplots(figsize=(8, 4), ncols=3, nrows=1, subplot_kw={'projection': '3d'}, layout='constrained')
         self._setup_error_col_layout(axs.flat,
                                      data_handler.min_dim, data_handler.max_dim,
                                      binary = binary, relative_error = relative_error)
@@ -310,7 +308,6 @@ class DataPlotter:
             ax.axes.yaxis.set_ticklabels([])
             ax.axes.zaxis.set_ticklabels([])
 
-        fig.tight_layout()
         cbar = fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm_orig, cmap=cmap_plot), location='left', ax=axs[0:2], orientation='vertical', shrink = 0.4, aspect = 12, pad = 0.1, ticks = ticks, extend = extend_v_field)
 
         cbar.ax.set_yticklabels(tick_labels)
@@ -321,7 +318,7 @@ class DataPlotter:
         cbar.ax.set_yticklabels(ticks_error_labels)
 
         self._finish(fig, filename = filename, draw = False, block = False, dpi = 400)
-        print('plot field completed')
+        print(f'[plot_field] done -> {filename}')
 
     def plot_data(self, dataset, draw=True, block=False, filename=None):
 
@@ -382,4 +379,4 @@ class DataPlotter:
         fig.suptitle('Data Points', fontsize=self.FONT_SIZE)
 
         self._finish(fig, title = None, filename = filename, draw = draw, block = block, dpi = 600)
-        print('plot data points completed')
+        print(f'[plot_data] done -> {filename}')

@@ -108,12 +108,13 @@ def _build_paramlist(setup_file, config, seeds, keylist, extract_params_from_set
         filename = params_to_filename(params, keylist)
         paramlist += [(params, filename)]
 
-    # Make directories
-    for params, _ in paramlist:
-        base_dir = params['program']['base_dir']
-        for key in params['program']:
-            if key != 'base_dir':
-                os.makedirs(os.path.join(base_dir, params['program'][key]), exist_ok=True)
+    # Make directories (skip when using MLflow — algorithm_fn creates a tmpdir)
+    if not os.environ.get("MLFLOW_TRACKING_URI"):
+        for params, _ in paramlist:
+            base_dir = params['program']['base_dir']
+            for key in params['program']:
+                if key != 'base_dir':
+                    os.makedirs(os.path.join(base_dir, params['program'][key]), exist_ok=True)
 
     return paramlist
 
@@ -139,25 +140,40 @@ def _gpu_worker(args):
     _run_single(runfunc, params, keylist, experiment_name)
 
 
-def _make_algorithm_fn(solver_run, keylist):
-    """Create an algorithm_fn(params, seed) for ExperimentRunner."""
+def _make_algorithm_fn(solver_run):
+    """Create an algorithm_fn(params, seed) for ExperimentRunner.
+
+    Uses a temporary directory with a simple filename since MLflow
+    provides the permanent, organized storage.
+    """
     def algorithm_fn(params, seed):
-        filename = params_to_filename(params, keylist)
-        return solver_run(params, filename)
+        import tempfile
+        tmpdir = tempfile.mkdtemp(prefix="pinn_run_")
+        params['program']['base_dir'] = tmpdir
+        for key in params['program']:
+            if key != 'base_dir':
+                os.makedirs(os.path.join(tmpdir, params['program'][key]),
+                            exist_ok=True)
+        return solver_run(params, "run")
     return algorithm_fn
 
 
 def _make_post_run_fn():
-    """Create a post_run_fn(result) that logs PINNs artifacts."""
+    """Create a post_run_fn(result) that logs PINNs artifacts and cleans up."""
     def post_run_fn(result):
         from pinn_source.mlflow_logging import log_pinns_artifacts
         log_pinns_artifacts(
-            filename=result['filename'],
             loss_handler=result['loss_handler'],
             train_handler=result['train_handler'],
             artifact_dirs=result.get('artifact_dirs'),
             timings=result.get('timings'),
         )
+        # Clean up temporary run directory
+        import shutil
+        import tempfile
+        base_dir = result.get('base_dir')
+        if base_dir and base_dir.startswith(tempfile.gettempdir()):
+            shutil.rmtree(base_dir, ignore_errors=True)
     return post_run_fn
 
 
@@ -170,7 +186,7 @@ def _run_single(solver_run, params, keylist, experiment_name):
 
         runner = ExperimentRunner(
             params=params,
-            algorithm_fn=_make_algorithm_fn(solver_run, keylist),
+            algorithm_fn=_make_algorithm_fn(solver_run),
             experiment_name=experiment_name,
             post_run_fn=_make_post_run_fn(),
         )

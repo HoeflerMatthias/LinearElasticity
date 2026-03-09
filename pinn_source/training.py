@@ -15,7 +15,6 @@ class PINNTrainHandler:
         self.train_preparation_callback = None
         self.callbacks = []
         self.adam_callbacks = []
-        self._pending_finalize = []
 
         self.filenames = {
             'fit': {
@@ -57,7 +56,7 @@ class PINNTrainHandler:
         ns.minimize(pb_fit, 'keras', tf.keras.optimizers.Adam(learning_rate=learning_rate_adam), num_epochs=epochs_adam)
         ns.minimize(pb_fit, bfgs_backend, 'BFGS', num_epochs=epochs_bfgs)
 
-        self._pending_finalize.append((callbacks[0], pb_fit))
+        callbacks[0].finalize(pb_fit, block=False)
 
     def train_physics(self, learning_rate_adam: float, epochs_adam: int, epochs_bfgs, data: ns.DataCollection = None, bfgs_backend='scipy'):
 
@@ -82,7 +81,7 @@ class PINNTrainHandler:
 
         ns.minimize(pb, bfgs_backend, 'BFGS', num_epochs=epochs_bfgs)
 
-        self._pending_finalize.append((callbacks[0], pb))
+        callbacks[0].finalize(pb, block=False)
 
     def train_main(self, learning_rate_adam: float, epochs_adam: int, epochs_bfgs, data: ns.DataCollection = None, bfgs_backend='scipy'):
 
@@ -115,13 +114,10 @@ class PINNTrainHandler:
 
         ns.minimize(pb, bfgs_backend, 'BFGS', num_epochs=epochs_bfgs)
 
-        self._pending_finalize.append((callbacks[0], pb))
+        callbacks[0].finalize(pb, block=False)
 
     def finalize_all(self):
-        """Save history JSON and loss-curve plots for all phases."""
-        for cb, pb in self._pending_finalize:
-            cb.finalize(pb, block=False)
-        self._pending_finalize.clear()
+        """Close any remaining matplotlib figures."""
         plt.close('all')
 
 #############################################################################

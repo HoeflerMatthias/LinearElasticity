@@ -143,6 +143,7 @@ class OptimizationProblem:
         return total
 
 
+
 # --------------------------------------------------------------------------- #
 # Public API
 # --------------------------------------------------------------------------- #
@@ -225,7 +226,7 @@ def _minimize_keras(pb, optimizer, num_epochs, log_frequency=100):
         total_loss, loss_vals = train_n_steps(tf.constant(n, dtype=tf.int32))
         epoch += n
 
-        # Log train losses
+        # Log train + test losses to history
         if epoch % log_frequency == 0:
             global_itr = pb.iteration_offset + epoch
             for loss, val in zip(pb.train_losses, loss_vals):
@@ -284,7 +285,7 @@ def _minimize_scipy(pb, method_name, num_epochs):
         for cb in pb.callbacks:
             cb(pb, itr[0], itr[0])
 
-        # Log train + test losses (every 100 steps to reduce overhead)
+        # Log train + test losses to history (every 100 steps to reduce overhead)
         if itr[0] % 100 == 0:
             global_itr = pb.iteration_offset + itr[0]
             total = 0.0
@@ -385,7 +386,7 @@ def _minimize_tfp_lbfgs(pb, num_epochs):
 
     num_itr = int(result.num_iterations.numpy())
 
-    # Log final train + test losses
+    # Log final train + test losses to history
     global_itr = pb.iteration_offset + num_itr
     for loss in pb.train_losses:
         val = loss(data)

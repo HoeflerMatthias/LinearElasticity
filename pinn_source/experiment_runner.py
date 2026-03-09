@@ -65,7 +65,8 @@ class ExperimentRunner:
                     seed=self.seed,
                     params=self.params,
                 )
-                log_params_flat(self.params)
+                log_params_flat({k: v for k, v in self.params.items()
+                                 if k != "seed"})
                 mlflow.log_param("seed", self.seed)
 
                 params = copy.deepcopy(self.params)

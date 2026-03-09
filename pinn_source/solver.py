@@ -414,7 +414,7 @@ def run_solver(params, filename):
         'train_handler': train_handler,
         'timings': timings,
         'artifact_dirs': artifact_dirs,
-        'filename': filename,
+        'base_dir': base,
     }
 
 
