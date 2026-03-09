@@ -1,6 +1,4 @@
-import csv
 import tempfile
-from pathlib import Path
 
 from firedrake import CheckpointFile
 
@@ -20,14 +18,30 @@ def save_solution_checkpoint(u, alpha, u_true=None, alpha_true=None):
     return tmp.name
 
 
+def log_fem_artifacts(result):
+    """Log FEM-specific artifacts to the active MLflow run.
+
+    Assumes an MLflow run is already active (opened by ExperimentRunner).
+    Scalar metrics are handled by ExperimentRunner; this logs history
+    trajectories as step-metrics and the solution checkpoint as artifact.
+    """
+    import mlflow
+
+    _log_history_metrics(result.metrics)
+    if result.solution_file:
+        mlflow.log_artifact(result.solution_file)
+
+
 def log_result_to_mlflow(result):
-    """Log an InvScarResult to MLflow (one run per call)."""
+    """Log an InvScarResult to MLflow (opens its own run).
+
+    Kept for standalone use outside ExperimentRunner.
+    """
     import mlflow
 
     with mlflow.start_run():
         mlflow.log_params(result.params)
 
-        # Log scalar final metrics
         for k, val in result.metrics.items():
             if isinstance(val, (int, float)):
                 mlflow.log_metric(k, float(val))
@@ -36,54 +50,29 @@ def log_result_to_mlflow(result):
                     if isinstance(sub_v, (int, float)):
                         mlflow.log_metric(f"{k}.{sub_k}", float(sub_v))
 
-        # Log history arrays as a CSV artifact
-        _log_history_artifact(result.metrics)
-
-        # Log solution checkpoint
-        if result.solution_file:
-            mlflow.log_artifact(result.solution_file)
+        log_fem_artifacts(result)
 
 
-def _log_history_artifact(metrics):
-    """Write history lists from metrics to a temp CSV and log as MLflow artifact."""
+def _log_history_metrics(metrics, batch_size=500):
+    """Log history lists as MLflow step-metrics using batched API."""
     import mlflow
-    import json
+    from mlflow.entities import Metric
+    import time
 
-    # Scalar histories → CSV
-    scalar_keys = [
-        k for k in metrics
-        if k.endswith("_hist") and isinstance(metrics[k], list)
-        and metrics[k] and not isinstance(metrics[k][0], dict)
-    ]
-    if scalar_keys:
-        max_len = max(len(metrics[k]) for k in scalar_keys)
-        if max_len:
-            tmp = tempfile.NamedTemporaryFile(
-                mode="w", suffix=".csv", delete=False, prefix="history_"
-            )
-            writer = csv.writer(tmp)
-            writer.writerow(["iter"] + scalar_keys)
-            for i in range(max_len):
-                row = [i]
-                for k in scalar_keys:
-                    lst = metrics[k]
-                    row.append(lst[i] if i < len(lst) else "")
-                writer.writerow(row)
-            tmp.close()
-            mlflow.log_artifact(tmp.name)
-            Path(tmp.name).unlink(missing_ok=True)
+    client = mlflow.tracking.MlflowClient()
+    run_id = mlflow.active_run().info.run_id
+    timestamp = int(time.time() * 1000)
 
-    # Dict histories (term_hist, iter_hist) → JSON
-    dict_keys = [
-        k for k in metrics
-        if k.endswith("_hist") and isinstance(metrics[k], list)
-        and metrics[k] and isinstance(metrics[k][0], dict)
-    ]
-    for k in dict_keys:
-        tmp = tempfile.NamedTemporaryFile(
-            mode="w", suffix=".json", delete=False, prefix=f"{k}_"
-        )
-        json.dump(metrics[k], tmp)
-        tmp.close()
-        mlflow.log_artifact(tmp.name)
-        Path(tmp.name).unlink(missing_ok=True)
+    batch = []
+    for key, values in metrics.items():
+        if not (key.endswith("_hist") and isinstance(values, list) and values):
+            continue
+        # Scalar histories (e.g. J_fid_hist, err_u_rel_hist)
+        if not isinstance(values[0], dict):
+            metric_key = key.removesuffix("_hist")
+            for step, val in enumerate(values):
+                if isinstance(val, (int, float)):
+                    batch.append(Metric(metric_key, float(val), timestamp, step))
+
+    for i in range(0, len(batch), batch_size):
+        client.log_batch(run_id, metrics=batch[i:i + batch_size])

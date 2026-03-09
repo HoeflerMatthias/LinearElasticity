@@ -31,7 +31,7 @@ def _ensure_tf_variable(v):
 # --------------------------------------------------------------------------- #
 
 class VariablesStitcher:
-    """Converts between a list of ``tf.Variable`` and a flat NumPy vector."""
+    """Converts between a list of ``tf.Variable`` and a flat vector."""
 
     def __init__(self, variables):
         self.variables = variables
@@ -39,6 +39,8 @@ class VariablesStitcher:
         self.dtypes = [v.dtype for v in variables]
         self.sizes = [int(np.prod(s)) for s in self.shapes]
         self.total_size = sum(self.sizes)
+
+    # --- NumPy variants (for scipy) --------------------------------------- #
 
     def get_values(self):
         return np.concatenate([v.numpy().flatten() for v in self.variables])
@@ -60,7 +62,7 @@ class VariablesStitcher:
                 parts.append(g.numpy().astype(np.float64).flatten())
         return np.concatenate(parts)
 
-    # --- TF-tensor variants (no NumPy round-trips) ----------------------- #
+    # --- TF-tensor variants (for TFP, no NumPy round-trips) --------------- #
 
     def get_values_tf(self):
         """Return all variables as a single flat ``tf.Tensor`` (float64)."""
@@ -77,16 +79,6 @@ class VariablesStitcher:
                 tf.cast(flat_tensor[offset:offset + size], v.dtype), shape
             ))
             offset += size
-
-    def flatten_gradients_tf(self, grads):
-        """Flatten gradients into a single ``tf.Tensor`` (float64)."""
-        parts = []
-        for g, size in zip(grads, self.sizes):
-            if g is None:
-                parts.append(tf.zeros([size], dtype=tf.float64))
-            else:
-                parts.append(tf.cast(tf.reshape(g, [-1]), tf.float64))
-        return tf.concat(parts, axis=0)
 
 
 # --------------------------------------------------------------------------- #
@@ -141,7 +133,6 @@ class OptimizationProblem:
         for loss in self.train_losses:
             total = total + loss(data)
         return total
-
 
 
 # --------------------------------------------------------------------------- #
@@ -252,7 +243,7 @@ def _minimize_keras(pb, optimizer, num_epochs, log_frequency=100):
 
 
 # --------------------------------------------------------------------------- #
-# SciPy L-BFGS-B
+# SciPy L-BFGS-B (CPU line search, GPU forward/backward)
 # --------------------------------------------------------------------------- #
 
 def _minimize_scipy(pb, method_name, num_epochs):
@@ -329,7 +320,7 @@ def _minimize_scipy(pb, method_name, num_epochs):
 # TensorFlow Probability L-BFGS (GPU-native)
 # --------------------------------------------------------------------------- #
 
-def _minimize_tfp_lbfgs(pb, num_epochs):
+def _minimize_tfp_lbfgs(pb, num_epochs, log_frequency=500):
     pb.history['transitions'].append({'iter': pb.iteration_offset, 'method': 'L-BFGS'})
     import tensorflow_probability as tfp
 
@@ -342,7 +333,6 @@ def _minimize_tfp_lbfgs(pb, num_epochs):
 
     @tf.function
     def value_and_gradients(flat_params):
-        # Assign flat tensor into variables
         offset = 0
         for v, shape, size, dtype in zip(
             stitcher.variables, stitcher.shapes,
@@ -367,45 +357,61 @@ def _minimize_tfp_lbfgs(pb, num_epochs):
 
         return total_loss, flat_grads
 
-    x0 = stitcher.get_values_tf()
-
     if pb._verbose:
-        print(f"  TFP-BFGS  starting  ({num_epochs} max iterations, {stitcher.total_size} variables)")
+        print(f"  TFP-BFGS  starting  ({num_epochs} max iterations, "
+              f"{stitcher.total_size} variables, logging every {log_frequency})")
 
-    result = tfp.optimizer.lbfgs_minimize(
-        value_and_gradients,
-        initial_position=x0,
-        max_iterations=num_epochs,
-        tolerance=0.0,
-        x_tolerance=0.0,
-        f_relative_tolerance=0.0,
-    )
+    # Run in chunks to log intermediate losses.  TFP L-BFGS has no Python
+    # callback, so we re-enter periodically.  The Hessian approximation is
+    # rebuilt from the last ~50 steps, so the cost of resetting is minimal.
+    total_itr = 0
+    remaining = num_epochs
+    converged = False
 
-    # Assign final values back
-    stitcher.set_values_tf(result.position)
+    while remaining > 0 and not converged:
+        chunk = min(log_frequency, remaining)
 
-    num_itr = int(result.num_iterations.numpy())
-
-    # Log final train + test losses to history
-    global_itr = pb.iteration_offset + num_itr
-    for loss in pb.train_losses:
-        val = loss(data)
-        pb.history['losses'][loss.name]['log'].append(float(val.numpy()))
-        pb.history['losses'][loss.name]['iter'].append(global_itr)
-    for loss in pb.test_losses:
-        key = f"test/{loss.name}"
-        pb.history['losses'][key]['log'].append(
-            float(loss.loss_base_call().numpy())
+        result = tfp.optimizer.lbfgs_minimize(
+            value_and_gradients,
+            initial_position=stitcher.get_values_tf(),
+            max_iterations=chunk,
+            tolerance=0.0,
+            x_tolerance=0.0,
+            f_relative_tolerance=0.0,
         )
-        pb.history['losses'][key]['iter'].append(global_itr)
 
-    pb.iteration_offset += num_itr
+        stitcher.set_values_tf(result.position)
+        chunk_itr = int(result.num_iterations.numpy())
+        total_itr += chunk_itr
+        remaining -= chunk_itr
+        converged = bool(result.converged.numpy())
 
-    # Run callbacks at completion
-    for cb in pb.callbacks:
-        cb(pb, num_epochs, num_epochs)
+        # Log train + test losses to history
+        global_itr = pb.iteration_offset + total_itr
+        total_loss_val = 0.0
+        for loss in pb.train_losses:
+            val = float(loss(data).numpy())
+            pb.history['losses'][loss.name]['log'].append(val)
+            pb.history['losses'][loss.name]['iter'].append(global_itr)
+            total_loss_val += val
+        for loss in pb.test_losses:
+            key = f"test/{loss.name}"
+            pb.history['losses'][key]['log'].append(
+                float(loss.loss_base_call().numpy())
+            )
+            pb.history['losses'][key]['iter'].append(global_itr)
 
-    converged = bool(result.converged.numpy())
-    final_loss = float(result.objective_value.numpy())
+        if pb._verbose:
+            print(f"  TFP-BFGS  {total_itr:>6d}/{num_epochs}  loss={total_loss_val:.6e}")
+
+        for cb in pb.callbacks:
+            cb(pb, total_itr, total_itr)
+
+        if chunk_itr < chunk:
+            break
+
+    pb.iteration_offset += total_itr
+
     if pb._verbose:
-        print(f"  TFP-BFGS  done  iterations={num_itr}  loss={final_loss:.6e}  converged={converged}")
+        final_loss = float(result.objective_value.numpy())
+        print(f"  TFP-BFGS  done  iterations={total_itr}  loss={final_loss:.6e}  converged={converged}")

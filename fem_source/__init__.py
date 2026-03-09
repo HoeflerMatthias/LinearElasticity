@@ -5,4 +5,4 @@ from .problem import (
     regularization_functionals,
 )
 from .data import load_ground_truth, apply_noise
-from .io import save_solution_checkpoint, log_result_to_mlflow
+from .io import save_solution_checkpoint, log_result_to_mlflow, log_fem_artifacts
