@@ -88,14 +88,14 @@ def _log_history_metrics(metrics, batch_size=500):
         client.log_batch(run_id, metrics=batch[i:i + batch_size])
 
 
-def run_solver_mpi(solver_name, params, nprocs):
+def run_solver_mpi(solver_name, params, seed, nprocs):
     """Run a FEM solver under mpirun and return an InvScarResult."""
     input_fd, input_path = tempfile.mkstemp(suffix=".json", prefix="fem_in_")
     output_path = input_path.replace(".json", "_out.json")
 
     try:
         with os.fdopen(input_fd, "w") as f:
-            json.dump(params, f)
+            json.dump({**params, "seed": seed}, f)
 
         proc = subprocess.run(
             ["mpirun", "--oversubscribe", "-np", str(nprocs),

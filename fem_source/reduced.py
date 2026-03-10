@@ -8,14 +8,14 @@ from . import (
     L2_error, rel_L2_error, pointwise_rel_L2_error, InvScarResult,
     create_box_mesh, create_spaces, symmetry_bcs,
     make_forward_solver, regularization_functionals,
-    load_ground_truth, apply_noise,
+    load_ground_truth, apply_noise, make_observation_weight,
     save_solution_checkpoint,
 )
 
 __all__ = ["invscar"]
 
 
-def invscar(**params):
+def invscar(seed=0, **params):
 
     # Geometry
     Nx_i = params.get('Nx_inv', 10)
@@ -36,6 +36,8 @@ def invscar(**params):
 
     lower_bnd = params.get('lower_bnd', 0.0)
     upper_bnd = params.get('upper_bnd', np.inf)
+
+    obs_n_elements = params.get('obs_n_elements', None)
 
     data_csv = params.get("data_csv", "linear_symcube_p10.h5")
 
@@ -59,20 +61,26 @@ def invscar(**params):
     u_i.interpolate(ud)
     alpha_i.interpolate(Constant(1.5))
 
+    # Observation weight (DG0 element mask)
+    if obs_n_elements is not None:
+        w_obs = make_observation_weight(mm_inv, obs_n_elements, seed=seed)
+    else:
+        w_obs = Constant(1.0)
+
     # Forward solver
     fwd_solver, W, G = make_forward_solver(u_i, alpha_i, bcs, lambda_, mu, p_load)
 
     # Objective and regularization
     J_R = regularization_functionals()[J_regu]
 
-    J_ful = lambda d: 0.5 * dot(d, d) * dx
+    J_ful = lambda d: 0.5 * dot(d, d) * w_obs * dx
 
     J = J_ful(u_i - ud) + lam_reg * J_R(alpha_i)
     dJ = lam_reg * derivative(J_R(alpha_i), alpha_i) + derivative(action(G, p_i), alpha_i)
 
     # Adjoint
     dG = adjoint(derivative(G, u_i))
-    La = -dot(u_i - ud, v_i) * dx
+    La = -dot(u_i - ud, v_i) * w_obs * dx
     adj_prob = LinearVariationalProblem(dG, La, p_i, bcs)
     adj_solver = LinearVariationalSolver(adj_prob)
 
@@ -138,6 +146,7 @@ def invscar(**params):
         'noise_level': noise_level, 'noise_seed': noise_seed,
         'J_regu': J_regu, 'lam_reg': float(lam_reg),
         'lower_bnd': lower_bnd, 'upper_bnd': upper_bnd,
+        'obs_n_elements': obs_n_elements,
         'data_csv': data_csv,
         'solver': 'reduced',
     }

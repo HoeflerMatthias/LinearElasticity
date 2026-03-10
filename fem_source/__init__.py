@@ -4,5 +4,5 @@ from .problem import (
     strain_energy, make_forward_solver, solve_forward,
     regularization_functionals,
 )
-from .data import load_ground_truth, apply_noise
+from .data import load_ground_truth, apply_noise, make_observation_weight
 from .io import save_solution_checkpoint, log_result_to_mlflow, log_fem_artifacts

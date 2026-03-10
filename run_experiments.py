@@ -38,12 +38,13 @@ def objective(config):
     solver_module = f"fem_source.{solver_name}"
 
     def algorithm_fn(params, seed):
+        params.pop("seed", None)
         if MPI_PROCS > 1:
             from fem_source.io import run_solver_mpi
-            result = run_solver_mpi(solver_name, params, MPI_PROCS)
+            result = run_solver_mpi(solver_name, params, seed, MPI_PROCS)
         else:
             mod = importlib.import_module(solver_module)
-            result = mod.invscar(**params)
+            result = mod.invscar(seed=seed, **params)
         # Flatten scalar metrics for ExperimentRunner logging
         metrics = {}
         for k, v in result.metrics.items():

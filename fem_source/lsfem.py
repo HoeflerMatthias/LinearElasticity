@@ -8,7 +8,7 @@ from . import (
     L2_error, rel_L2_error, pointwise_rel_L2_error, InvScarResult,
     create_box_mesh, create_spaces, symmetry_bcs,
     regularization_functionals,
-    load_ground_truth, apply_noise,
+    load_ground_truth, apply_noise, make_observation_weight,
     save_solution_checkpoint,
 )
 
@@ -16,7 +16,7 @@ __all__ = ["invscar"]
 
 
 
-def invscar(**params):
+def invscar(seed=0, **params):
 
     # Geometry
     Nx_i = params.get('Nx_inv', 10)
@@ -41,6 +41,8 @@ def invscar(**params):
     lam_bcn = Constant(params.get('lam_bcn', 1e-1))
     lam_reg = Constant(params.get('lam_reg', 2e-4))
     lam_jump = Constant(params.get('lam_jump', 1e6))
+
+    obs_n_elements = params.get('obs_n_elements', None)
 
     data_csv = params.get("data_csv", "linear_symcube_p10.h5")
 
@@ -72,6 +74,12 @@ def invscar(**params):
 
     alpha_ifun.dat.data[:] = rng.uniform(low=0.5, high=2.5, size=alpha_ifun.dat.data.shape)
 
+    # Observation weight (DG0 element mask)
+    if obs_n_elements is not None:
+        w_obs = make_observation_weight(mm_inv, obs_n_elements, seed=seed)
+    else:
+        w_obs = Constant(1.0)
+
     # LSFEM residual formulation
     n = FacetNormal(mm_inv)
     h = CellDiameter(mm_inv)
@@ -89,7 +97,7 @@ def invscar(**params):
     J_R = regularization_functionals()[J_regu]
 
     # Objective terms
-    R_data = 0.5 * inner(u_i - ud, u_i - ud) * dx
+    R_data = 0.5 * inner(u_i - ud, u_i - ud) * w_obs * dx
     R_cont = 0.5 * avg(h) * inner(jump_trac, jump_trac) * dS
     R_PDE = 0.5 * inner(e_PDE, e_PDE) * dx
     R_bcn_1 = 0.5 * inner(e_bcn_1, e_bcn_1) * ds(6)
@@ -240,6 +248,7 @@ def invscar(**params):
         'J_regu': J_regu, 'lam_reg': float(lam_reg),
         'lam_dat': float(lam_dat), 'lam_pde': float(lam_pde),
         'lam_bcn': float(lam_bcn), 'lam_jump': float(lam_jump),
+        'obs_n_elements': obs_n_elements,
         'data_csv': data_csv,
         'solver': 'lsfem',
     }

@@ -6,14 +6,14 @@ from . import (
     L2_error, rel_L2_error, pointwise_rel_L2_error, InvScarResult,
     create_box_mesh, create_spaces, symmetry_bcs,
     solve_forward,
-    load_ground_truth, apply_noise,
+    load_ground_truth, apply_noise, make_observation_weight,
     save_solution_checkpoint,
 )
 
 __all__ = ["invscar"]
 
 
-def invscar(**params):
+def invscar(seed=0, **params):
 
     # Geometry
     Nx_i = params.get('Nx_inv', 40)
@@ -33,6 +33,8 @@ def invscar(**params):
     lam_H1 = params.get('lam_H1', 1e-5)
     lam_TV = params.get('lam_TV', 0.0)
     eps_tv = params.get('eps_tv', 1e-1)
+
+    obs_n_elements = params.get('obs_n_elements', None)
 
     data_csv = params.get("data_csv", "linear_symcube_p10.h5")
 
@@ -72,6 +74,12 @@ def invscar(**params):
     for bc in bcs_i_v:
         bc.apply(u_ifun)
 
+    # Observation weight (DG0 element mask)
+    if obs_n_elements is not None:
+        w_obs = make_observation_weight(mm_inv, obs_n_elements, seed=seed)
+    else:
+        w_obs = Constant(1.0)
+
     # KKT formulation
     def a(u, v, a):
         return (lambda_ * inner(div(u), div(v)) + 2 * a * mu * inner(sym(grad(u)), sym(grad(v)))) * dx
@@ -79,7 +87,7 @@ def invscar(**params):
     def F(v):
         return dot(p_load * as_vector((0, 0, 1)), v) * ds(6)
 
-    adjoint_eq = inner(u_i - ud, v_i) * dx + a(v_i, p_i, alpha_i)
+    adjoint_eq = inner(u_i - ud, v_i) * w_obs * dx + a(v_i, p_i, alpha_i)
 
     # Derivative-form regularization (specific to KKT)
     dR_L2 = lambda a, b: inner(a, b) * dx
@@ -99,7 +107,7 @@ def invscar(**params):
 
     # Objective evaluation for monitoring
     def compute_objective_terms(u_fun, alpha_fun):
-        J_fid = 0.5 * assemble(inner(u_fun - ud, u_fun - ud) * dx(domain=mm_inv))
+        J_fid = 0.5 * assemble(inner(u_fun - ud, u_fun - ud) * w_obs * dx(domain=mm_inv))
         J_reg = 0.0
         if lam_L2:
             J_reg += lam_L2 * 0.5 * assemble(alpha_fun ** 2 * dx(domain=mm_inv))
@@ -167,6 +175,7 @@ def invscar(**params):
         'noise_level': noise_level, 'noise_seed': noise_seed,
         'lam_L2': lam_L2, 'lam_H1': lam_H1, 'lam_TV': lam_TV, 'eps_tv': eps_tv,
         'u0_blend_gamma': gamma,
+        'obs_n_elements': obs_n_elements,
         'data_csv': data_csv,
         'solver': 'kkt',
     }

@@ -13,8 +13,9 @@ def main():
     with open(input_path) as f:
         params = json.load(f)
 
+    seed = params.pop("seed", 0)
     mod = importlib.import_module(f"fem_source.{solver_name}")
-    result = mod.invscar(**params)
+    result = mod.invscar(seed=seed, **params)
 
     # Only rank 0 writes output
     from firedrake import COMM_WORLD
