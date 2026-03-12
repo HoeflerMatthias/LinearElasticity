@@ -10,8 +10,8 @@ inverse_params:
       wT: 0.1
       fourier: false
       fourier_params:
+        mode: random
         sig: 3.0
-        output: 9
 
 net:
   model_path: false

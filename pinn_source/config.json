@@ -11,8 +11,8 @@
               "wT": 1e-1,
               "fourier": false,
               "fourier_params": {
-                  "sig": 3.0,
-                  "output": 9
+                  "mode": "random",
+                  "sig": 3.0
               }
           }
       }

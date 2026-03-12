@@ -5,16 +5,29 @@ import numpy as np
 class FourierLayer(tf.keras.layers.Layer):
 
     @staticmethod
-    def initialise_weight_matrix(sigma, input_dim, output_dim, np_random_generator):
-        return np_random_generator.normal(scale=sigma, size=(output_dim, input_dim))
+    def random_weight_matrix(sigma, num_frequencies, input_dim, np_random_generator):
+        return np_random_generator.normal(scale=sigma, size=(input_dim, num_frequencies))
 
-    def __init__(self, output_fourier, B, name="layerFourier", **kwargs):
+    @staticmethod
+    def log_spaced_weight_matrix(num_frequencies, input_dim):
+        if num_frequencies % input_dim != 0:
+            raise ValueError(
+                f"For log_spaced Fourier features, layers[0] ({num_frequencies}) "
+                f"must be divisible by input_dim ({input_dim})")
+        L = num_frequencies // input_dim
+        freqs = 2.0 ** np.arange(L)
+        B = np.zeros((input_dim, num_frequencies))
+        for d in range(input_dim):
+            B[d, d * L:(d + 1) * L] = freqs
+        return B
+
+    def __init__(self, num_frequencies, B, name="layerFourier", **kwargs):
         super(FourierLayer, self).__init__()
         self.B = B
-        self.output_fourier = output_fourier
+        self.num_frequencies = num_frequencies
         init = tf.constant_initializer(self.B)
         self.fixed_B_Layer = tf.keras.layers.Dense(
-            self.output_fourier, kernel_initializer=init, trainable=False, use_bias=False, name=name)
+            self.num_frequencies, kernel_initializer=init, trainable=False, use_bias=False, name=name)
 
     def call(self, inputs):
         freq_inputs = self.fixed_B_Layer(inputs)
@@ -24,7 +37,7 @@ class FourierLayer(tf.keras.layers.Layer):
 
     def get_config(self):
         config = super().get_config().copy()
-        config.update({'output_fourier': self.output_fourier, 'B': self.B})
+        config.update({'num_frequencies': self.num_frequencies, 'B': self.B})
         return config
 
     @classmethod
@@ -74,8 +87,16 @@ def get_network(input_dim, input_mean, input_variance, output_dim, output_mean, 
     inputs = tf.keras.layers.Normalization(mean = input_mean, variance = input_variance, name = "InputNormalisation")(inputs_orig)
 
     if params.get('fourier', False):
-        B = FourierLayer.initialise_weight_matrix(params['fourier_params']['sig'], params['layers'][0], input_dim, np_random_generator)
-        l1 = FourierLayer(params['layers'][0], B)(inputs)
+        fourier_params = params['fourier_params']
+        num_frequencies = params['layers'][0]
+        mode = fourier_params.get('mode', 'random')
+        if mode == 'random':
+            B = FourierLayer.random_weight_matrix(fourier_params['sig'], num_frequencies, input_dim, np_random_generator)
+        elif mode == 'log_spaced':
+            B = FourierLayer.log_spaced_weight_matrix(num_frequencies, input_dim)
+        else:
+            raise ValueError(f"Unknown Fourier mode: {mode}")
+        l1 = FourierLayer(num_frequencies, B)(inputs)
     else:
         l1 = tf.keras.layers.Dense(params['layers'][0], activation=activation, name="layer0")(inputs)
 
