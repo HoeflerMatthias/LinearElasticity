@@ -1,0 +1,32 @@
+# KKT inverse solver configuration
+
+data_csv: "/opt/project/data/linear_symcube_two_inclusions_p10.h5"
+
+# Geometry (inverse mesh)
+Nx_inv: 60
+Ny_inv: 60
+Nz_inv: 30
+
+# Physics
+lambda_: 650.0
+mu: 8.0
+p_load: 10.0
+
+# Noise
+noise_level: 0.1
+noise_seed: 123
+p_noise_level: 0.1
+
+# Regularization
+lam_L2: 0.0
+lam_H1: 1.0e-6
+lam_TV: 0.0
+eps_tv: 1.0e-1
+
+# Observation (null = use all elements)
+obs_n_elements: 2000
+
+# Initial guess blending
+u0_blend_gamma: 0.2
+
+seed: 0

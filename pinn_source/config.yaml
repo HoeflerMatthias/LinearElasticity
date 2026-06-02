@@ -1,0 +1,97 @@
+inverse_params:
+  mu:
+    sigmoid_scalings: [1.0, 30.0]
+    initial_factor: 1.5
+    threshold: 0.5
+    max_value: 10.0
+    wTV: 0.0
+    numTV: 4000
+    net:
+      model_path: false
+      layers: [32, 32, 32, 32]
+      wT: 0.0
+      wA: 1.0
+      fourier: false
+      fourier_params:
+        mode: random
+        sig: 3.0
+
+net:
+  model_path: false
+  layers: [256, 256, 256, 256, 256]
+  residual_connection: false
+  BL: true
+  BL_params:
+    axis: [0, 1, 2]
+    value: [0.0, 0.0, 0.0]
+    distance_axes: [[0], [1], [2]]
+  fourier: false
+  fourier_params:
+    mode: random
+    sig: 3.0
+
+data: "data/linear_symcube_two_inclusions_p10.csv"
+
+model:
+  body_force: [0.0, 0.0, 0.0]
+  lam: 650
+  mu: 8.0
+  pressure: 10.0
+  scaling: 0.01
+
+numPDE: 8000
+numBCN: 1000
+numData: 2000
+numTest: 1000
+
+mesh_loss: false
+
+bfgs_backend: "tfp"
+
+adam1: 200
+bfgs1: 200
+bfgs2: 200
+adam3: 10000
+bfgs3: 10000
+lr1: 0.01
+lr2: 0.0003
+
+phases: [true, false, true]
+
+wPDE: !!float 5.0e-01
+wFit: !!float 5.0e03
+wBCN: !!float 1.0e00
+wT: !!float 1.0e-08
+
+seed: 0
+
+batch_size: 1.0
+
+adapt: false
+adapt_alpha: 0.1
+RBA: true
+RBA_params:
+  losses: ["PDE"]
+  eta: 0.4
+  gamma: 0.9
+  lambda0: 0.2
+  update_frequency: 10
+
+SNR: 0.1
+SNR_boundary: 0.1
+
+program:
+  base_dir: "default"
+  history_dir: "History"
+  data_dir: "Data"
+  model_dir: "Model"
+  history_fit_dir: "History/Fit"
+  data_fit_dir: "Data/Fit"
+  history_physics_dir: "History/Physics"
+  data_physics_dir: "Data/Physics"
+  solution_dir: "Solution"
+  solution_bc_dir: "Solution/BC"
+  solution_fit_dir: "Solution/Fit"
+  solution_sample_dir: "Solution/Sample"
+  solution_weight_dir: "Solution/Weight"
+  solution_field_dir: "Solution/Field"

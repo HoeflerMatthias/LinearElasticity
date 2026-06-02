@@ -1,0 +1,36 @@
+# Reduced (adjoint) inverse solver configuration
+
+data_csv: "/opt/project/data/linear_symcube_two_inclusions_p10.h5"
+
+# Geometry (inverse mesh)
+Nx_inv: 60
+Ny_inv: 60
+Nz_inv: 30
+
+# Physics
+lambda_: 650.0
+mu: 8.0
+p_load: 10.0
+
+# Noise
+noise_level: 0.1
+noise_seed: 123
+p_noise_level: 0.1
+
+# Regularization
+J_regu: "TV"
+lam_reg: 1.0e-5
+
+# Observation (null = use all elements)
+obs_n_elements: 2000
+
+# Box constraints on alpha
+lower_bnd: 0.0
+upper_bnd: .inf
+
+# Optimizer
+bfgs_disp: true
+
+seed: 0
+
+OMP_NUM_THREADS: 1

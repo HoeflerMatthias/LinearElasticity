@@ -1,0 +1,38 @@
+# LSFEM inverse solver configuration
+
+data_csv: "/opt/project/data/linear_symcube_two_inclusions_p10.h5"
+
+# Geometry (inverse mesh)
+Nx_inv: 10
+Ny_inv: 10
+Nz_inv: 5
+P: 1
+
+# Physics
+lambda_: 650.0
+mu: 8.0
+p_load: 10.0
+
+# Noise
+noise_level: 5.0e-2
+noise_seed: 123
+p_noise_level: 0.0
+
+# Regularization
+J_regu: "H1"
+lam_reg: 5.0e-4
+
+# LSFEM weights
+lam_dat: 1.0e+7
+lam_pde: 1.0e-1
+lam_bcn: 1.0e-1
+lam_jump: 1.0e+6
+
+# Observation (null = use all elements)
+obs_n_elements: null
+
+# Optimizer
+n_outer: 15
+bfgs_disp: true
+
+seed: 0
