@@ -1,7 +1,7 @@
 # Context and Objective
 
 This repository contains the code for the numerical experiment of the paper
-"On Parameter Identification in Three-Dimensional Elasticity and Discretisation with Physics-Informed Neural Networks".
+**[https://doi.org/10.1088/1361-6420/ae7f46](On Parameter Identification in Three-Dimensional Elasticity and Discretisation with Physics-Informed Neural Networks)**.
 
 Currently, there are three methods implemented:
 1. PINN-based reconstruction of the all-at-once optimization problem
@@ -58,7 +58,10 @@ docker compose run firedrake python run_experiments.py
 This project builds on the following repositories:
 
 - **[pezzus/invscar](https://github.com/pezzus/invscar)** by Pezzuto et al. — basis for the FEM inverse solvers (methods 2 and 3).
+- **[nisaba](https://github.com/FrancescoRegazzoni/LDNets)** by Regazzoni et al. - basis for the PINNs optimisation framework
 
 ## References
 
-[1] G. Pozzi, D. Ambrosi, and S. Pezzuto, ‘Reconstruction of the local contractility of the cardiac muscle from deficient apparent kinematics’, Apr. 17, 2024, arXiv: arXiv:2404.11137. Accessed: May 28, 2024. [Online]. Available: http://arxiv.org/abs/2404.11137
+[1] Pozzi, G., Ambrosi, D., & Pezzuto, S. (2024). Reconstruction of the local contractility of the cardiac muscle from deficient apparent kinematics. Journal of the Mechanics and Physics of Solids, 192, 105793.
+
+[2] Regazzoni, F., Pagani, S., Salvador, M., Dede’, L., & Quarteroni, A. (2024). Learning the intrinsic dynamics of spatio-temporal processes through latent dynamics networks. Nature Communications, 15(1), 1834.
