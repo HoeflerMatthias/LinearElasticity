@@ -1,7 +1,7 @@
 # Context and Objective
 
 This repository contains the code for the numerical experiment of the paper
-**[https://doi.org/10.1088/1361-6420/ae7f46](On Parameter Identification in Three-Dimensional Elasticity and Discretisation with Physics-Informed Neural Networks)**.
+**[On Parameter Identification in Three-Dimensional Elasticity and Discretisation with Physics-Informed Neural Networks](https://doi.org/10.1088/1361-6420/ae7f46)**.
 
 Currently, there are three methods implemented:
 1. PINN-based reconstruction of the all-at-once optimization problem
