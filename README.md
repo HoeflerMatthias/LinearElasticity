@@ -13,7 +13,7 @@ The forward problem is generated in `forward.py`.
 
 ### Some notes before running the reconstruction
 - The current setup logs results to an MLflow server. Make sure to have a running instance. Otherwise, the logging needs to be changed individually.
-- The environments provided are based on Docker/Docker Compose. Make sure that your MLflow server is reachable within your docker container by setting the `extra_hosts` parameter in the docker-compose.yml
+- The environments provided are based on Docker/Docker Compose. The `docker-compose.yml` ships an MLflow server (`mlflow-server-local`, UI on http://localhost:8080) on a shared Docker network; the `firedrake` and `pinns` services reach it at `http://mlflow-server-local:5000` via `MLFLOW_TRACKING_URI`. To use an external server instead, change that variable and its host to the `--allowed-hosts` list of the server.
 - The forward simulation from `forward.py` needs to be run prior to the reconstruction.
 
 ## 1. PINN-based reconstruction of the all-at-once optimization problem
