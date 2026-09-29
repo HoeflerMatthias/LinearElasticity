@@ -65,3 +65,19 @@ This project builds on the following repositories:
 [1] Pozzi, G., Ambrosi, D., & Pezzuto, S. (2024). Reconstruction of the local contractility of the cardiac muscle from deficient apparent kinematics. Journal of the Mechanics and Physics of Solids, 192, 105793.
 
 [2] Regazzoni, F., Pagani, S., Salvador, M., Dede’, L., & Quarteroni, A. (2024). Learning the intrinsic dynamics of spatio-temporal processes through latent dynamics networks. Nature Communications, 15(1), 1834.
+
+# Quick Setup
+These steps are required to make the code run as is.
+
+## Setup of MLflow
+The repository uses MLflow to store results and organise runs. The `docker-compose.yml` comes with a service for starting a local MLflow server:
+```
+docker compose up mlflow-server-local
+```
+
+## Generating the Simulation Data
+The `forward.py` regenerates the FEM simulation data which is then also used for the reconstruction. Use the `firedrake` service to regenerate, e.g.
+```
+docker compose run firedrake python3 forward.py split
+```
+The output is stored in `data`.
